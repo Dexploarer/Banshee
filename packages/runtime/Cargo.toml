@@ -1,0 +1,48 @@
+[package]
+name = "banshee-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+banshee-core = { path = "../core" }
+banshee-plugin-bootstrap = { path = "../plugin-bootstrap" }
+
+# HTTP client for AI SDK
+reqwest = { version = "0.11", features = ["json"] }
+
+# Emotion engine
+banshee-emotion-engine = { path = "../../crates/emotion_engine" }
+
+# Core dependencies
+tokio = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Actor framework
+actix = { workspace = true }
+
+# Graph database for knowledge graphs
+petgraph = "0.6"
+
+# Storage
+sqlx = { workspace = true, optional = true }
+redis = { workspace = true, optional = true }
+
+# Configuration
+config = "0.14"
+
+[features]
+default = ["postgres", "redis-cache"]
+postgres = ["sqlx"]
+redis-cache = ["redis"]
+
+[dev-dependencies]
+tokio-test = { workspace = true }
