@@ -1,0 +1,14 @@
+import { Connection, PublicKey, SendOptions, Signer, TransactionSignature } from "@solana/web3.js";
+/** Set the multisig `config_authority`. */
+export declare function multisigSetConfigAuthority({ connection, feePayer, multisigPda, configAuthority, newConfigAuthority, memo, signers, sendOptions, programId, }: {
+    connection: Connection;
+    feePayer: Signer;
+    multisigPda: PublicKey;
+    configAuthority: PublicKey;
+    newConfigAuthority: PublicKey;
+    memo?: string;
+    signers?: Signer[];
+    sendOptions?: SendOptions;
+    programId?: PublicKey;
+}): Promise<TransactionSignature>;
+//# sourceMappingURL=multisigSetConfigAuthority.d.ts.map

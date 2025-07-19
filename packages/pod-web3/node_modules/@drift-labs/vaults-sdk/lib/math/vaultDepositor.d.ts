@@ -1,0 +1,23 @@
+import { BN } from '@drift-labs/sdk';
+import { Vault, VaultDepositor, VaultProtocol } from '../types/types';
+/**
+ * Calculates the unrealized profitShare for a vaultDepositor
+ * @param vaultDepositor
+ * @param vaultEquity
+ * @param vault
+ * @returns
+ */
+export declare function calculateApplyProfitShare(vaultDepositor: VaultDepositor, vaultEquity: BN, vault: Vault): {
+    profitShareAmount: BN;
+    profitShareShares: BN;
+};
+export declare function calculateProfitShare(vaultDepositor: VaultDepositor, totalAmount: BN, vault: Vault, vaultProtocol?: VaultProtocol): BN;
+/**
+ * Calculates the equity across deposits and realized profit for a vaultDepositor
+ * @param vaultDepositor vault depositor account
+ * @param vaultEquity total vault equity
+ * @param vault vault account
+ * @param vaultProtocol if vault account has "vaultProtocol" then this is needed
+ * @returns
+ */
+export declare function calculateRealizedVaultDepositorEquity(vaultDepositor: VaultDepositor, vaultEquity: BN, vault: Vault, vaultProtocol?: VaultProtocol): BN;

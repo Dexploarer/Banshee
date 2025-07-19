@@ -1,0 +1,16 @@
+import { Connection, PublicKey, SendOptions, Signer, TransactionSignature } from "@solana/web3.js";
+/** Execute a config transaction. */
+export declare function configTransactionExecute({ connection, feePayer, multisigPda, transactionIndex, member, rentPayer, spendingLimits, signers, sendOptions, programId, }: {
+    connection: Connection;
+    feePayer: Signer;
+    multisigPda: PublicKey;
+    transactionIndex: bigint;
+    member: Signer;
+    rentPayer: Signer;
+    /** In case the transaction adds or removes SpendingLimits, pass the array of their Pubkeys here. */
+    spendingLimits?: PublicKey[];
+    signers?: Signer[];
+    sendOptions?: SendOptions;
+    programId?: PublicKey;
+}): Promise<TransactionSignature>;
+//# sourceMappingURL=configTransactionExecute.d.ts.map

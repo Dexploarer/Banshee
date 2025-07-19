@@ -1,0 +1,1 @@
+{"version":3,"file":"ProposalCreateArgs.d.ts","sourceRoot":"","sources":["../../../src/generated/types/ProposalCreateArgs.ts"],"names":[],"mappings":"AAAA;;;;;GAKG;AAEH,OAAO,KAAK,IAAI,MAAM,2BAA2B,CAAA;AACjD,MAAM,MAAM,kBAAkB,GAAG;IAC/B,gBAAgB,EAAE,IAAI,CAAC,MAAM,CAAA;IAC7B,KAAK,EAAE,OAAO,CAAA;CACf,CAAA;AAED;;;GAGG;AACH,eAAO,MAAM,sBAAsB,yCAOhC,CAAA"}

@@ -1,0 +1,211 @@
+# LibSQL Agent Character Sheet
+# This demonstrates LibSQL embedded database with replication
+
+id = "550e8400-e29b-41d4-a716-446655440001"
+name = "LibSQL Agent"
+version = "1.0.0"
+description = "Character sheet configured for LibSQL with replication capabilities"
+created_at = "2025-01-19T12:00:00Z"
+updated_at = "2025-01-19T12:00:00Z"
+active = true
+
+[database_config]
+primary_db = "LibSQL"
+fallback_db = "SurrealRocks"
+data_path = "./data/libsql_agent.db"
+memory_limit_mb = 256
+max_connections = 8
+enable_encryption = true
+backup_enabled = true
+
+[database_config.sync_settings]
+remote_url = "libsql://your-remote-db.turso.io"
+auth_token = "your-auth-token-here"
+sync_interval_seconds = 300
+conflict_resolution = "LastWriteWins"
+
+[secrets]
+encryption_key = "libsql-encryption-key-32-characters"
+
+[secrets.api_keys.turso]
+value = "your-turso-api-key"
+encrypted = false
+description = "Turso database API key"
+scopes = ["database"]
+
+[secrets.wallets]
+
+[secrets.credentials.turso]
+username = "your-username"
+password = "your-password"
+endpoint = "https://api.turso.tech"
+
+[secrets.certificates]
+
+[mcp_servers]
+default_timeout_seconds = 30
+max_concurrent_connections = 3
+retry_attempts = 5
+health_check_interval_seconds = 120
+
+[mcp_servers.servers.database_sync]
+name = "Database Sync Server"
+endpoint = "https://sync.turso.io/mcp"
+auth_type = { Bearer = { token = "sync-token" } }
+capabilities = ["sync", "backup", "restore"]
+enabled = true
+priority = 1
+
+[templates]
+default_language = "en"
+template_engine = "Tera"
+
+[templates.prompt_templates.sync_status]
+name = "Database Sync Status"
+template = "Database sync status: {{ status }}. Last sync: {{ last_sync }}. Conflicts: {{ conflicts }}"
+category = "system"
+description = "Template for reporting database sync status"
+version = "1.0.0"
+
+[[templates.prompt_templates.sync_status.variables]]
+name = "status"
+var_type = "String"
+required = true
+
+[[templates.prompt_templates.sync_status.variables]]
+name = "last_sync"
+var_type = "DateTime"
+required = true
+
+[[templates.prompt_templates.sync_status.variables]]
+name = "conflicts"
+var_type = "Number"
+required = false
+default_value = 0
+
+[templates.response_templates]
+
+[templates.workflow_templates.data_sync]
+name = "Data Synchronization Workflow"
+parallel_execution = false
+error_handling = { Retry = { max_attempts = 3, delay_seconds = 30 } }
+
+[[templates.workflow_templates.data_sync.steps]]
+name = "check_connection"
+action = { McpCall = { server = "database_sync", method = "check_connection", params = {} } }
+depends_on = []
+timeout_seconds = 10
+
+[[templates.workflow_templates.data_sync.steps]]
+name = "sync_data"
+action = { McpCall = { server = "database_sync", method = "sync", params = {} } }
+depends_on = ["check_connection"]
+timeout_seconds = 60
+
+[knowledge]
+vector_search_enabled = true
+embedding_model = "text-embedding-3-small"
+chunk_size = 512
+overlap_size = 100
+indexing_strategy = "Hybrid"
+
+[knowledge.knowledge_bases.database_docs]
+name = "LibSQL Documentation"
+description = "LibSQL and Turso documentation"
+update_frequency = "Weekly"
+access_level = "Private"
+
+[[knowledge.knowledge_bases.database_docs.sources]]
+File = { path = "./docs/libsql.md", format = "Markdown" }
+
+[[knowledge.knowledge_bases.database_docs.sources]]
+Url = { url = "https://docs.turso.tech/", headers = {} }
+
+[personality]
+decision_making = "Analytical"
+
+[personality.big_five]
+openness = 0.8
+conscientiousness = 0.9
+extraversion = 0.5
+agreeableness = 0.6
+neuroticism = 0.2
+
+[personality.communication_style]
+formality = "Formal"
+verbosity = "Detailed"
+emotion_expression = "Minimal"
+humor_level = "Subtle"
+technical_depth = "Expert"
+
+[personality.emotional_profile]
+default_mood = 0.7
+emotional_volatility = 0.2
+empathy_level = 0.6
+stress_tolerance = 0.8
+optimism_bias = 0.6
+
+[personality.learning_preferences]
+learning_rate = 0.8
+memory_retention = 0.9
+adaptation_speed = 0.7
+curiosity_level = 0.9
+risk_tolerance = 0.3
+
+[capabilities]
+enabled_capabilities = ["conversation", "memory", "emotion", "database_sync", "analytics"]
+
+[capabilities.capability_limits.database_sync]
+max_calls_per_minute = 10
+max_calls_per_hour = 100
+requires_approval = false
+
+[capabilities.tool_access]
+web_access = true
+file_system_access = true
+database_access = true
+network_access = true
+external_apis = true
+blockchain_access = false
+
+[capabilities.permissions]
+read_permissions = ["memory", "database", "sync_logs"]
+write_permissions = ["memory", "database"]
+execute_permissions = ["sync", "backup"]
+admin_permissions = ["restore"]
+restricted_paths = ["/etc", "/root"]
+allowed_domains = ["turso.io", "docs.turso.tech"]
+
+[memory_settings]
+max_memory_mb = 512
+conversation_history_limit = 2000
+emotional_memory_days = 60
+knowledge_cache_size_mb = 256
+auto_cleanup_enabled = true
+compression_enabled = true
+backup_frequency = "Hourly"
+
+[performance]
+max_concurrent_tasks = 8
+request_timeout_seconds = 45
+batch_processing_enabled = true
+cache_strategy = "Hybrid"
+optimization_level = "Aggressive"
+
+[logging]
+log_level = "Debug"
+log_to_file = true
+log_file_path = "./logs/libsql_agent.log"
+max_log_file_size_mb = 50
+log_rotation_count = 10
+structured_logging = true
+sensitive_data_filtering = true
+
+[security]
+encryption_enabled = true
+secure_communication = true
+certificate_validation = true
+access_control_enabled = true
+audit_logging = true
+data_retention_days = 180
+anonymization_enabled = true

@@ -7,7 +7,8 @@ repository.workspace = true
 
 [dependencies]
 banshee-core = { path = "../core" }
-banshee-plugin-bootstrap = { path = "../plugin-bootstrap" }
+# banshee-plugin-bootstrap = { path = "../plugin-bootstrap" }
+# banshee-plugin-memory = { path = "../plugin-memory" }
 
 # HTTP client for AI SDK
 reqwest = { version = "0.11", features = ["json"] }
@@ -32,17 +33,40 @@ actix = { workspace = true }
 # Graph database for knowledge graphs
 petgraph = "0.6"
 
-# Storage
-sqlx = { workspace = true, optional = true }
-redis = { workspace = true, optional = true }
+# Storage (now required for memory plugin)
+sqlx = { workspace = true }
+redis = { workspace = true }
 
 # Configuration
 config = "0.14"
 
+# Logging
+tracing-subscriber = "0.3"
+
+# Environment variables
+dotenvy = "0.15"
+
+# TOML parsing
+toml = { workspace = true }
+
+# Embedded databases (optional features for different database types)
+# Uncomment as needed:
+# surrealdb = { version = "2.0", optional = true, features = ["kv-rocksdb"] }
+# libsql = { version = "0.5", optional = true, default-features = false, features = ["core"] }
+# native_db = { version = "0.7", optional = true }
+# redb = { version = "2.1", optional = true }
+# duckdb = { version = "1.1", optional = true, features = ["bundled"] }
+
 [features]
-default = ["postgres", "redis-cache"]
-postgres = ["sqlx"]
-redis-cache = ["redis"]
+default = []
+# Optional embedded database features (uncomment when dependencies are added)
+# surrealdb-rocks = ["dep:surrealdb"]
+# surrealdb-memory = ["dep:surrealdb"]
+# libsql = ["dep:libsql"]
+# native-db = ["dep:native_db"]
+# redb = ["dep:redb"]
+# duckdb = ["dep:duckdb"]
+# all-databases = ["surrealdb-rocks", "libsql", "native-db", "redb", "duckdb"]
 
 [dev-dependencies]
 tokio-test = { workspace = true }

@@ -1,0 +1,17 @@
+import { PublicKey, VersionedTransaction } from "@solana/web3.js";
+/**
+ * Returns unsigned `VersionedTransaction` that needs to be
+ * signed by `creator` and `feePayer` before sending it.
+ */
+export declare function configTransactionExecute({ blockhash, feePayer, multisigPda, member, rentPayer, transactionIndex, spendingLimits, programId, }: {
+    blockhash: string;
+    feePayer: PublicKey;
+    multisigPda: PublicKey;
+    transactionIndex: bigint;
+    member: PublicKey;
+    rentPayer: PublicKey;
+    /** In case the transaction adds or removes SpendingLimits, pass the array of their Pubkeys here. */
+    spendingLimits?: PublicKey[];
+    programId?: PublicKey;
+}): VersionedTransaction;
+//# sourceMappingURL=configTransactionExecute.d.ts.map

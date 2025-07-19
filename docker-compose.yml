@@ -1,0 +1,113 @@
+# Docker Compose for Banshee Development Environment
+# 2025 Best Practices for PostgreSQL + Redis + pgAdmin
+
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: banshee-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: banshee
+      POSTGRES_USER: banshee
+      POSTGRES_PASSWORD: banshee_dev_password
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./packages/plugin-memory/migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U banshee -d banshee"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - banshee-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: banshee-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - banshee-network
+
+  # pgAdmin for Database Management
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: banshee-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@banshee.dev
+      PGADMIN_DEFAULT_PASSWORD: admin123
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    ports:
+      - "8080:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - banshee-network
+
+  # Redis Commander for Redis Management
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: banshee-redis-commander
+    restart: unless-stopped
+    environment:
+      REDIS_HOSTS: redis:redis:6379
+    ports:
+      - "8081:8081"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - banshee-network
+
+  # Banshee Runtime (uncomment when ready for container deployment)
+  # banshee-runtime:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: banshee-runtime
+  #   restart: unless-stopped
+  #   environment:
+  #     DATABASE_URL: postgresql://banshee:banshee_dev_password@postgres:5432/banshee
+  #     REDIS_URL: redis://redis:6379
+  #     RUST_LOG: info
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   networks:
+  #     - banshee-network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  banshee-network:
+    driver: bridge

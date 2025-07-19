@@ -1,0 +1,4 @@
+import { ErrorWithLogs } from "@metaplex-foundation/cusper";
+export declare function translateAndThrowAnchorError(err: unknown): never;
+export declare const isErrorWithLogs: (err: unknown) => err is ErrorWithLogs;
+//# sourceMappingURL=errors.d.ts.map

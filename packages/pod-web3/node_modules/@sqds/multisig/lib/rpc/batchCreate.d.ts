@@ -1,0 +1,18 @@
+import { Connection, PublicKey, SendOptions, Signer, TransactionSignature } from "@solana/web3.js";
+/** Create a new vault transactions batch. */
+export declare function batchCreate({ connection, feePayer, multisigPda, batchIndex, creator, rentPayer, vaultIndex, memo, signers, sendOptions, programId, }: {
+    connection: Connection;
+    feePayer: Signer;
+    multisigPda: PublicKey;
+    batchIndex: bigint;
+    /** Member of the multisig that is creating the batch. */
+    creator: Signer;
+    /** Payer for the batch account rent. If not provided, `creator` is used. */
+    rentPayer?: Signer;
+    vaultIndex: number;
+    memo?: string;
+    signers?: Signer[];
+    sendOptions?: SendOptions;
+    programId?: PublicKey;
+}): Promise<TransactionSignature>;
+//# sourceMappingURL=batchCreate.d.ts.map

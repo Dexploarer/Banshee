@@ -1,0 +1,19 @@
+import { AddressLookupTableAccount, PublicKey, TransactionMessage } from "@solana/web3.js";
+export declare function batchAddTransaction({ vaultIndex, multisigPda, member, rentPayer, batchIndex, transactionIndex, ephemeralSigners, transactionMessage, addressLookupTableAccounts, programId, }: {
+    vaultIndex: number;
+    multisigPda: PublicKey;
+    /** Member of the multisig that is adding the transaction. */
+    member: PublicKey;
+    /** Payer for the transaction account rent. If not provided, `member` is used. */
+    rentPayer?: PublicKey;
+    batchIndex: bigint;
+    transactionIndex: number;
+    /** Number of additional signing PDAs required by the transaction. */
+    ephemeralSigners: number;
+    /** Transaction message to wrap into a batch transaction. */
+    transactionMessage: TransactionMessage;
+    /** `AddressLookupTableAccount`s referenced in `transaction_message`. */
+    addressLookupTableAccounts?: AddressLookupTableAccount[];
+    programId?: PublicKey;
+}): import("@solana/web3.js").TransactionInstruction;
+//# sourceMappingURL=batchAddTransaction.d.ts.map

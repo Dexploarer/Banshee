@@ -1,0 +1,30 @@
+export * from './Batch';
+export * from './ConfigTransaction';
+export * from './Multisig';
+export * from './ProgramConfig';
+export * from './Proposal';
+export * from './SpendingLimit';
+export * from './TransactionBuffer';
+export * from './VaultBatchTransaction';
+export * from './VaultTransaction';
+import { Batch } from './Batch';
+import { VaultBatchTransaction } from './VaultBatchTransaction';
+import { ConfigTransaction } from './ConfigTransaction';
+import { Multisig } from './Multisig';
+import { ProgramConfig } from './ProgramConfig';
+import { Proposal } from './Proposal';
+import { SpendingLimit } from './SpendingLimit';
+import { TransactionBuffer } from './TransactionBuffer';
+import { VaultTransaction } from './VaultTransaction';
+export declare const accountProviders: {
+    Batch: typeof Batch;
+    VaultBatchTransaction: typeof VaultBatchTransaction;
+    ConfigTransaction: typeof ConfigTransaction;
+    Multisig: typeof Multisig;
+    ProgramConfig: typeof ProgramConfig;
+    Proposal: typeof Proposal;
+    SpendingLimit: typeof SpendingLimit;
+    TransactionBuffer: typeof TransactionBuffer;
+    VaultTransaction: typeof VaultTransaction;
+};
+//# sourceMappingURL=index.d.ts.map

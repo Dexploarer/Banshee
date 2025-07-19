@@ -1,11 +1,18 @@
 [workspace]
 members = [
     "packages/core",
-    "packages/plugin-bootstrap", 
-    "packages/plugin-emotion",
-    "packages/plugin-memory",
-    "packages/plugin-web3",
-    "packages/plugin-providers",
+    # Core Pods
+    "packages/pod-bootstrap", 
+    "packages/pod-emotion",
+    "packages/pod-memory",
+    "packages/pod-web3",
+    "packages/pod-providers",
+    # DeFi Pods
+    "packages/pod-pancakeswap-infinity",
+    "packages/pod-pump-fun",
+    "packages/pod-jito-mev",
+    "packages/pod-metaplex-core",
+    # Runtime and CLI
     "packages/runtime",
     "packages/cli",
     # Legacy crates (will be migrated)
@@ -41,8 +48,8 @@ serde_json = "1.0"
 toml = "0.8"
 
 # Database
-sqlx = { version = "0.7", features = ["postgres", "chrono", "uuid", "runtime-tokio-rustls"] }
-redis = { version = "0.25", features = ["tokio-comp"] }
+sqlx = { version = "0.8", features = ["postgres", "chrono", "uuid", "runtime-tokio-rustls"] }
+redis = { version = "0.26", features = ["tokio-comp"] }
 
 # HTTP client
 reqwest = { version = "0.12", features = ["json", "stream"] }

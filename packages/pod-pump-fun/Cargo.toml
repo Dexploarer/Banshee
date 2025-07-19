@@ -1,0 +1,38 @@
+[package]
+name = "pod-pump-fun"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+banshee-core = { path = "../core" }
+async-trait = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+anyhow = "1.0"
+thiserror = "1.0"
+tokio = { version = "1.40", features = ["full"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+
+# Solana SDK dependencies
+solana-sdk = "2.3.0"
+solana-client = "2.3.0"
+solana-program = "2.3.0"
+spl-token = "7.0.0"
+spl-associated-token-account = "6.0.0"
+
+# Math and bonding curve calculations
+rust_decimal = "1.36"
+rust_decimal_macros = "1.36"
+
+# HTTP client for API interactions
+reqwest = { version = "0.12", features = ["json"] }
+
+# Base58 encoding
+bs58 = "0.5"
+
+# Borsh for on-chain data serialization
+borsh = "0.10"
+
+# Date/time handling
+chrono = { version = "0.4", features = ["serde"] }

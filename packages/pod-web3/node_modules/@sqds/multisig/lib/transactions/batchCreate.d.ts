@@ -1,0 +1,19 @@
+import { PublicKey, VersionedTransaction } from "@solana/web3.js";
+/**
+ * Returns unsigned `VersionedTransaction` that needs to be
+ * signed by `creator` and `feePayer` before sending it.
+ */
+export declare function batchCreate({ blockhash, feePayer, multisigPda, batchIndex, creator, rentPayer, vaultIndex, memo, programId, }: {
+    blockhash: string;
+    feePayer: PublicKey;
+    multisigPda: PublicKey;
+    batchIndex: bigint;
+    /** Member of the multisig that is creating the batch. */
+    creator: PublicKey;
+    /** Payer for the batch account rent. If not provided, `creator` is used. */
+    rentPayer?: PublicKey;
+    vaultIndex: number;
+    memo?: string;
+    programId?: PublicKey;
+}): VersionedTransaction;
+//# sourceMappingURL=batchCreate.d.ts.map

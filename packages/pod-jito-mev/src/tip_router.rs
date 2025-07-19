@@ -1,0 +1,168 @@
+//! TipRouter integration for decentralized tip distribution
+
+use crate::{JitoError, TIP_ROUTER_PROGRAM_ID};
+use rust_decimal::Decimal;
+use solana_sdk::{
+    instruction::{AccountMeta, Instruction},
+    pubkey::Pubkey,
+    system_program,
+};
+
+/// TipRouter handles the July 2025 upgrade for decentralized tip distribution
+pub struct TipRouter;
+
+impl TipRouter {
+    /// Calculate tip distribution between stakers and validators
+    pub fn calculate_distribution(
+        total_tip_sol: Decimal,
+        staker_percentage: f64,
+        validator_percentage: f64,
+    ) -> Result<(Decimal, Decimal), JitoError> {
+        if (staker_percentage + validator_percentage - 100.0).abs() > 0.01 {
+            return Err(JitoError::TipRouterError(
+                "Percentages must sum to 100%".to_string(),
+            ));
+        }
+
+        let staker_amount = total_tip_sol
+            * Decimal::from_f64(staker_percentage / 100.0)
+                .ok_or_else(|| JitoError::TipRouterError("Invalid percentage".to_string()))?;
+        let validator_amount = total_tip_sol
+            * Decimal::from_f64(validator_percentage / 100.0)
+                .ok_or_else(|| JitoError::TipRouterError("Invalid percentage".to_string()))?;
+
+        Ok((staker_amount, validator_amount))
+    }
+
+    /// Create tip instruction for TipRouter
+    pub fn create_tip_instruction(
+        tipper: &Pubkey,
+        tip_amount_lamports: u64,
+        target_validator: Option<&Pubkey>,
+    ) -> Result<Instruction, JitoError> {
+        let program_id = TIP_ROUTER_PROGRAM_ID
+            .parse::<Pubkey>()
+            .map_err(|_| JitoError::TipRouterError("Invalid program ID".to_string()))?;
+
+        // Derive TipRouter PDA accounts
+        let (tip_pool, _) = Pubkey::find_program_address(&[b"tip_pool"], &program_id);
+
+        let (staker_pool, _) = Pubkey::find_program_address(&[b"staker_pool"], &program_id);
+
+        let (validator_pool, _) = Pubkey::find_program_address(&[b"validator_pool"], &program_id);
+
+        let mut accounts = vec![
+            AccountMeta::new(*tipper, true),         // Tipper (signer)
+            AccountMeta::new(tip_pool, false),       // Tip pool PDA
+            AccountMeta::new(staker_pool, false),    // Staker pool PDA
+            AccountMeta::new(validator_pool, false), // Validator pool PDA
+            AccountMeta::new_readonly(system_program::id(), false),
+        ];
+
+        // Add target validator if specified
+        if let Some(validator) = target_validator {
+            accounts.push(AccountMeta::new_readonly(*validator, false));
+        }
+
+        // Instruction data: [0] = instruction type, [1..9] = tip amount
+        let mut data = vec![0u8]; // Tip instruction
+        data.extend_from_slice(&tip_amount_lamports.to_le_bytes());
+
+        Ok(Instruction {
+            program_id,
+            accounts,
+            data,
+        })
+    }
+
+    /// Calculate dynamic tip based on MEV profit
+    pub fn calculate_dynamic_tip(
+        gross_profit_sol: Decimal,
+        dynamic_tip_percentage: f64,
+        min_tip_sol: Decimal,
+    ) -> Decimal {
+        let calculated_tip = gross_profit_sol
+            * Decimal::from_f64(dynamic_tip_percentage / 100.0).unwrap_or(Decimal::ZERO);
+
+        // Ensure minimum tip is met
+        calculated_tip.max(min_tip_sol)
+    }
+
+    /// Estimate APY boost from MEV tips
+    pub fn estimate_apy_boost(
+        stake_amount_sol: Decimal,
+        daily_tips_sol: Decimal,
+        base_apy: f64,
+    ) -> f64 {
+        if stake_amount_sol.is_zero() {
+            return base_apy;
+        }
+
+        // Calculate annualized tip return
+        let annual_tips = daily_tips_sol * Decimal::from(365);
+        let tip_apy = (annual_tips / stake_amount_sol * Decimal::from(100))
+            .to_f64()
+            .unwrap_or(0.0);
+
+        // Add to base APY (typically adds ~7% on mainnet)
+        base_apy + tip_apy
+    }
+
+    /// Get optimal validators for MEV submission based on performance
+    pub fn get_optimal_validators(
+        validator_metrics: &[(Pubkey, f64)], // (validator, reliability_score)
+        max_validators: usize,
+    ) -> Vec<Pubkey> {
+        let mut sorted_validators = validator_metrics.to_vec();
+        sorted_validators.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+
+        sorted_validators
+            .into_iter()
+            .take(max_validators)
+            .map(|(validator, _)| validator)
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_decimal_macros::dec;
+
+    #[test]
+    fn test_tip_distribution() {
+        let total_tip = dec!(1.0); // 1 SOL
+        let (staker_amount, validator_amount) =
+            TipRouter::calculate_distribution(total_tip, 97.0, 3.0).unwrap();
+
+        assert_eq!(staker_amount, dec!(0.97));
+        assert_eq!(validator_amount, dec!(0.03));
+    }
+
+    #[test]
+    fn test_dynamic_tip_calculation() {
+        let gross_profit = dec!(10.0); // 10 SOL profit
+        let tip = TipRouter::calculate_dynamic_tip(gross_profit, 20.0, dec!(0.001));
+
+        assert_eq!(tip, dec!(2.0)); // 20% of 10 SOL
+
+        // Test minimum tip
+        let small_profit = dec!(0.001);
+        let small_tip = TipRouter::calculate_dynamic_tip(small_profit, 20.0, dec!(0.001));
+        assert_eq!(small_tip, dec!(0.001)); // Minimum tip enforced
+    }
+
+    #[test]
+    fn test_apy_boost_calculation() {
+        let stake_amount = dec!(1000.0); // 1000 SOL staked
+        let daily_tips = dec!(0.2); // 0.2 SOL daily tips
+        let base_apy = 5.0; // 5% base APY
+
+        let boosted_apy = TipRouter::estimate_apy_boost(stake_amount, daily_tips, base_apy);
+
+        // 0.2 SOL * 365 days = 73 SOL annually
+        // 73 / 1000 * 100 = 7.3% boost
+        // Total APY = 5% + 7.3% = 12.3%
+        assert!((boosted_apy - 12.3).abs() < 0.1);
+    }
+}

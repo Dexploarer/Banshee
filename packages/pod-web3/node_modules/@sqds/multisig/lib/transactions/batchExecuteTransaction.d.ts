@@ -1,0 +1,16 @@
+import { Connection, PublicKey, VersionedTransaction } from "@solana/web3.js";
+/**
+ * Returns unsigned `VersionedTransaction` that needs to be
+ * signed by `creator` and `feePayer` before sending it.
+ */
+export declare function batchExecuteTransaction({ connection, blockhash, feePayer, multisigPda, member, batchIndex, transactionIndex, programId, }: {
+    connection: Connection;
+    blockhash: string;
+    feePayer: PublicKey;
+    multisigPda: PublicKey;
+    member: PublicKey;
+    batchIndex: bigint;
+    transactionIndex: number;
+    programId?: PublicKey;
+}): Promise<VersionedTransaction>;
+//# sourceMappingURL=batchExecuteTransaction.d.ts.map

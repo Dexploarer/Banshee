@@ -1,0 +1,16 @@
+import { PublicKey, TransactionInstruction } from "@solana/web3.js";
+export declare function spendingLimitUse({ multisigPda, member, spendingLimit, mint, vaultIndex, amount, decimals, destination, tokenProgram, memo, programId, }: {
+    multisigPda: PublicKey;
+    member: PublicKey;
+    spendingLimit: PublicKey;
+    /** Provide if `spendingLimit` is for an SPL token, omit if it's for SOL. */
+    mint?: PublicKey;
+    vaultIndex: number;
+    amount: number;
+    decimals: number;
+    destination: PublicKey;
+    tokenProgram?: PublicKey;
+    memo?: string;
+    programId?: PublicKey;
+}): TransactionInstruction;
+//# sourceMappingURL=spendingLimitUse.d.ts.map

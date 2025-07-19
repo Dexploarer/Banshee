@@ -1,0 +1,14 @@
+import { Program } from '@coral-xyz/anchor';
+import { TransactionSignature } from '@solana/web3.js';
+import { WrappedEvents } from '../types/types';
+type Log = {
+    txSig: TransactionSignature;
+    slot: number;
+    logs: string[];
+};
+export declare class LogParser {
+    private program;
+    constructor(program: Program);
+    parseEventsFromLogs(event: Log): WrappedEvents;
+}
+export {};

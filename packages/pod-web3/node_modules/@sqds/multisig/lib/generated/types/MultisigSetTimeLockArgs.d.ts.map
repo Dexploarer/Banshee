@@ -1,0 +1,1 @@
+{"version":3,"file":"MultisigSetTimeLockArgs.d.ts","sourceRoot":"","sources":["../../../src/generated/types/MultisigSetTimeLockArgs.ts"],"names":[],"mappings":"AAAA;;;;;GAKG;AAEH,OAAO,KAAK,IAAI,MAAM,2BAA2B,CAAA;AACjD,MAAM,MAAM,uBAAuB,GAAG;IACpC,QAAQ,EAAE,MAAM,CAAA;IAChB,IAAI,EAAE,IAAI,CAAC,OAAO,CAAC,MAAM,CAAC,CAAA;CAC3B,CAAA;AAED;;;GAGG;AACH,eAAO,MAAM,2BAA2B,qDAOrC,CAAA"}

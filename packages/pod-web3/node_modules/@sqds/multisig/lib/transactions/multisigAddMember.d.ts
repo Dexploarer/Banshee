@@ -1,0 +1,17 @@
+import { PublicKey, VersionedTransaction } from "@solana/web3.js";
+import { Member } from "../generated";
+/**
+ * Returns unsigned `VersionedTransaction` that needs to be
+ * signed by `configAuthority` and `feePayer` before sending it.
+ */
+export declare function multisigAddMember({ blockhash, feePayer, multisigPda, configAuthority, rentPayer, newMember, memo, programId, }: {
+    blockhash: string;
+    feePayer: PublicKey;
+    multisigPda: PublicKey;
+    configAuthority: PublicKey;
+    rentPayer: PublicKey;
+    newMember: Member;
+    memo?: string;
+    programId?: PublicKey;
+}): VersionedTransaction;
+//# sourceMappingURL=multisigAddMember.d.ts.map

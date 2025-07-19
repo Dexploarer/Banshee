@@ -1,0 +1,14 @@
+import { Connection, PublicKey, SendOptions, Signer, TransactionSignature } from "@solana/web3.js";
+/** Execute a transaction from a batch. */
+export declare function batchExecuteTransaction({ connection, feePayer, multisigPda, member, batchIndex, transactionIndex, signers, sendOptions, programId, }: {
+    connection: Connection;
+    feePayer: Signer;
+    multisigPda: PublicKey;
+    member: Signer;
+    batchIndex: bigint;
+    transactionIndex: number;
+    signers?: Signer[];
+    sendOptions?: SendOptions;
+    programId?: PublicKey;
+}): Promise<TransactionSignature>;
+//# sourceMappingURL=batchExecuteTransaction.d.ts.map

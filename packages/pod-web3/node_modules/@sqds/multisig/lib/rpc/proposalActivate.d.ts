@@ -1,0 +1,11 @@
+import { Connection, PublicKey, SendOptions, Signer, TransactionSignature } from "@solana/web3.js";
+export declare function proposalActivate({ connection, feePayer, member, multisigPda, transactionIndex, sendOptions, programId, }: {
+    connection: Connection;
+    feePayer: Signer;
+    member: Signer;
+    multisigPda: PublicKey;
+    transactionIndex: bigint;
+    sendOptions?: SendOptions;
+    programId?: PublicKey;
+}): Promise<TransactionSignature>;
+//# sourceMappingURL=proposalActivate.d.ts.map

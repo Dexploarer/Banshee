@@ -1,0 +1,7 @@
+import { VaultDepositor, VaultDepositorAccountEvents, VaultDepositorAccountSubscriber } from '../types/types';
+import { PollingVaultsProgramAccountSubscriber } from './pollingVaultsProgramAccountSubscriber';
+export declare class PollingVaultDepositorSubscriber extends PollingVaultsProgramAccountSubscriber<VaultDepositor, VaultDepositorAccountEvents> implements VaultDepositorAccountSubscriber {
+    addToAccountLoader(): Promise<void>;
+    fetch(): Promise<void>;
+    updateData(vaultDepositorAcc: VaultDepositor, slot: number): void;
+}

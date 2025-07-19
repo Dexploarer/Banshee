@@ -1,0 +1,44 @@
+import { PublicKey } from "@solana/web3.js";
+export declare function getProgramConfigPda({ programId, }: {
+    programId?: PublicKey;
+}): [PublicKey, number];
+export declare function getMultisigPda({ createKey, programId, }: {
+    createKey: PublicKey;
+    programId?: PublicKey;
+}): [PublicKey, number];
+export declare function getVaultPda({ multisigPda, 
+/** Authority index. */
+index, programId, }: {
+    multisigPda: PublicKey;
+    index: number;
+    programId?: PublicKey;
+}): [PublicKey, number];
+export declare function getEphemeralSignerPda({ transactionPda, ephemeralSignerIndex, programId, }: {
+    transactionPda: PublicKey;
+    ephemeralSignerIndex: number;
+    programId?: PublicKey;
+}): [PublicKey, number];
+export declare function getTransactionPda({ multisigPda, index, programId, }: {
+    multisigPda: PublicKey;
+    /** Transaction index. */
+    index: bigint;
+    programId?: PublicKey;
+}): [PublicKey, number];
+export declare function getProposalPda({ multisigPda, transactionIndex, programId, }: {
+    multisigPda: PublicKey;
+    /** Transaction index. */
+    transactionIndex: bigint;
+    programId?: PublicKey;
+}): [PublicKey, number];
+export declare function getBatchTransactionPda({ multisigPda, batchIndex, transactionIndex, programId, }: {
+    multisigPda: PublicKey;
+    batchIndex: bigint;
+    transactionIndex: number;
+    programId?: PublicKey;
+}): [PublicKey, number];
+export declare function getSpendingLimitPda({ multisigPda, createKey, programId, }: {
+    multisigPda: PublicKey;
+    createKey: PublicKey;
+    programId?: PublicKey;
+}): [PublicKey, number];
+//# sourceMappingURL=pda.d.ts.map

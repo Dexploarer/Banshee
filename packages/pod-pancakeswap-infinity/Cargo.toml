@@ -1,0 +1,60 @@
+[package]
+name = "banshee-pod-pancakeswap-infinity"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "PancakeSwap Infinity (v4) pod with hooks system and flash accounting integration"
+keywords = ["defi", "amm", "pancakeswap", "hooks", "ethereum"]
+
+[dependencies]
+banshee-core = { path = "../core" }
+
+# Async runtime
+tokio = { workspace = true }
+async-trait = { workspace = true }
+
+# Error handling
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# HTTP client for API calls
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+
+# Ethereum/EVM integration - using ethers instead of alloy
+ethers = { version = "2.0", features = [
+    "ws",
+    "rustls",
+    "ipc",
+    "abigen"
+] }
+
+# Numeric types for DeFi calculations
+ethers-core = { version = "2.0", default-features = false, features = ["eip712"] }
+primitive-types = "0.12"
+
+# Utilities
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+# Configuration
+config = "0.14"
+
+[dev-dependencies]
+tokio-test = { workspace = true }
+
+[features]
+default = []
+mainnet = []
+bsc = []
+polygon = []
+arbitrum = []
+base = []
+all-chains = ["mainnet", "bsc", "polygon", "arbitrum", "base"]

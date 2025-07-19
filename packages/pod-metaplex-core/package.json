@@ -1,0 +1,26 @@
+{
+  "name": "banshee-pod-metaplex-core",
+  "version": "0.1.0",
+  "description": "Metaplex Core pod with Solana Agent Kit integration",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "bun run src/index.ts",
+    "install-deps": "bun install"
+  },
+  "dependencies": {
+    "solana-agent-kit": "latest",
+    "@solana-agent-kit/plugin-nft": "latest",
+    "@solana-agent-kit/plugin-token": "latest",
+    "@solana/web3.js": "^1.98.0",
+    "bs58": "^6.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "ts-node": "^10.9.0",
+    "@types/node": "^20.0.0"
+  },
+  "peerDependencies": {
+    "node": ">=18.0.0"
+  }
+}

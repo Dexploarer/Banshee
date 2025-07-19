@@ -1,0 +1,15 @@
+import { Connection, PublicKey, VersionedTransaction } from "@solana/web3.js";
+/**
+ * Returns unsigned `VersionedTransaction` that needs to be
+ * signed by `member` and `feePayer` before sending it.
+ */
+export declare function vaultTransactionExecute({ connection, blockhash, feePayer, multisigPda, transactionIndex, member, programId, }: {
+    connection: Connection;
+    blockhash: string;
+    feePayer: PublicKey;
+    multisigPda: PublicKey;
+    transactionIndex: bigint;
+    member: PublicKey;
+    programId?: PublicKey;
+}): Promise<VersionedTransaction>;
+//# sourceMappingURL=vaultTransactionExecute.d.ts.map

@@ -1,0 +1,16 @@
+import { Connection, PublicKey, SendOptions, Signer, TransactionSignature } from "@solana/web3.js";
+/**
+ *  Execute the multisig transaction.
+ *  The transaction must be `ExecuteReady`.
+ */
+export declare function vaultTransactionExecute({ connection, feePayer, multisigPda, transactionIndex, member, signers, sendOptions, programId, }: {
+    connection: Connection;
+    feePayer: Signer;
+    multisigPda: PublicKey;
+    transactionIndex: bigint;
+    member: PublicKey;
+    signers?: Signer[];
+    sendOptions?: SendOptions;
+    programId?: PublicKey;
+}): Promise<TransactionSignature>;
+//# sourceMappingURL=vaultTransactionExecute.d.ts.map
