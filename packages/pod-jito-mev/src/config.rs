@@ -14,6 +14,9 @@ pub struct JitoMevConfig {
 
     /// Auth keypair for Jito (base58 encoded private key)
     pub auth_keypair: Option<String>,
+    
+    /// Key ID from secure key manager (preferred over raw auth_keypair)
+    pub auth_keypair_id: Option<String>,
 
     /// TipRouter configuration
     pub tip_router: TipRouterConfig,
@@ -102,6 +105,7 @@ impl Default for JitoMevConfig {
             block_engine_endpoint: crate::JITO_BLOCK_ENGINE_MAINNET.to_string(),
             network: NetworkType::MainnetBeta,
             auth_keypair: None,
+            auth_keypair_id: None,
             tip_router: TipRouterConfig {
                 staker_percentage: 97.0,
                 validator_percentage: 3.0,

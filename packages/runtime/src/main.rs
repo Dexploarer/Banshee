@@ -579,7 +579,7 @@ async fn demonstrate_redis_performance(redis_manager: &RedisManager) -> Result<(
 
 /// Demonstrate emotional state persistence and retrieval
 async fn demonstrate_emotional_persistence(agent_id: Uuid) -> Result<()> {
-    use banshee_core::emotion::{Emotion, EmotionalEvent, EmotionalState};
+    use banshee_core::emotion::{Emotion, EmotionalState};
 
     info!("--- Demonstrating Emotional Intelligence Persistence ---");
 

@@ -2,7 +2,9 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
+use tokio::time::timeout;
 
 use crate::{Action, Evaluator, Provider, Result};
 
@@ -297,12 +299,12 @@ impl std::fmt::Debug for PodEntry {
     }
 }
 
-
 /// Registry for managing all available pods with dependency resolution
 pub struct PodRegistry {
     pods: HashMap<PodId, PodEntry>,
     capabilities: HashMap<String, PodId>, // capability name -> pod providing it
     load_order: Vec<PodId>,               // Topologically sorted load order
+    timeout_config: PodTimeoutConfig,     // Timeout configuration
 }
 
 /// Legacy alias for backward compatibility
@@ -315,6 +317,17 @@ impl PodRegistry {
             pods: HashMap::new(),
             capabilities: HashMap::new(),
             load_order: Vec::new(),
+            timeout_config: PodTimeoutConfig::default(),
+        }
+    }
+
+    /// Create a new registry with custom timeout configuration
+    pub fn with_timeout_config(timeout_config: PodTimeoutConfig) -> Self {
+        Self {
+            pods: HashMap::new(),
+            capabilities: HashMap::new(),
+            load_order: Vec::new(),
+            timeout_config,
         }
     }
 
@@ -404,20 +417,26 @@ impl PodRegistry {
                 }
             }
 
-            // Initialize the pod
+            // Initialize the pod with timeout
             let pod = self.pods[pod_id].pod.clone();
-            let mut pod_guard = pod.write().await;
-
-            match pod_guard.initialize().await {
-                Ok(()) => {
-                    drop(pod_guard);
+            let timeout_duration = Duration::from_secs(self.timeout_config.init_timeout_secs);
+            
+            match timeout(timeout_duration, async move {
+                let mut pod_guard = pod.write().await;
+                pod_guard.initialize().await
+            }).await {
+                Ok(Ok(())) => {
                     self.pods.get_mut(pod_id).unwrap().state = PodState::Running;
                     Ok(())
                 }
-                Err(err) => {
-                    drop(pod_guard);
+                Ok(Err(err)) => {
                     self.pods.get_mut(pod_id).unwrap().state = PodState::Failed(err.clone());
                     Err(format!("Failed to initialize pod '{}': {}", pod_id, err))
+                }
+                Err(_) => {
+                    let err = format!("Timeout after {} seconds", self.timeout_config.init_timeout_secs);
+                    self.pods.get_mut(pod_id).unwrap().state = PodState::Failed(err.clone());
+                    Err(format!("Pod '{}' initialization timed out: {}", pod_id, err))
                 }
             }
         })
@@ -437,16 +456,34 @@ impl PodRegistry {
             Box::pin(self.shutdown(&dependent_id)).await?;
         }
 
-        // Shutdown the pod
+        // Shutdown the pod with timeout
         if let Some(entry) = self.pods.get(pod_id) {
             let pod = entry.pod.clone();
-            let mut pod_guard = pod.write().await;
-            pod_guard.shutdown().await?;
-            drop(pod_guard);
-
-            self.pods.get_mut(pod_id).unwrap().state = PodState::Stopped;
+            let timeout_duration = Duration::from_secs(self.timeout_config.shutdown_timeout_secs);
+            let pod_id_clone = pod_id.clone();
+            
+            match timeout(timeout_duration, async move {
+                let mut pod_guard = pod.write().await;
+                pod_guard.shutdown().await
+            }).await {
+                Ok(Ok(())) => {
+                    self.pods.get_mut(pod_id).unwrap().state = PodState::Stopped;
+                    Ok(())
+                }
+                Ok(Err(err)) => {
+                    // Still mark as stopped even if shutdown failed
+                    self.pods.get_mut(pod_id).unwrap().state = PodState::Stopped;
+                    Err(format!("Failed to shutdown pod '{}': {}", pod_id_clone, err))
+                }
+                Err(_) => {
+                    // Timeout - force stop
+                    self.pods.get_mut(pod_id).unwrap().state = PodState::Stopped;
+                    Err(format!("Pod '{}' shutdown timed out after {} seconds", pod_id_clone, self.timeout_config.shutdown_timeout_secs))
+                }
+            }
+        } else {
+            Ok(())
         }
-        Ok(())
     }
 
     /// Shutdown all pods
@@ -458,9 +495,14 @@ impl PodRegistry {
             if let Some(entry) = self.pods.get(&pod_id) {
                 if entry.state == PodState::Running {
                     let pod = entry.pod.clone();
-                    let mut pod_guard = pod.write().await;
-                    let _ = pod_guard.shutdown().await; // Don't fail on shutdown errors
-                    drop(pod_guard);
+                    let timeout_duration = Duration::from_secs(self.timeout_config.shutdown_timeout_secs);
+                    
+                    // Try to shutdown with timeout, but don't fail the overall process
+                    let _ = timeout(timeout_duration, async move {
+                        let mut pod_guard = pod.write().await;
+                        pod_guard.shutdown().await
+                    }).await;
+                    
                     self.pods.get_mut(&pod_id).unwrap().state = PodState::Stopped;
                 }
             }
@@ -560,16 +602,49 @@ impl PodRegistry {
     }
 }
 
+/// Pod initialization and shutdown timeout configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PodTimeoutConfig {
+    /// Timeout for pod initialization in seconds
+    pub init_timeout_secs: u64,
+    /// Timeout for pod shutdown in seconds  
+    pub shutdown_timeout_secs: u64,
+}
+
+impl Default for PodTimeoutConfig {
+    fn default() -> Self {
+        Self {
+            init_timeout_secs: 30,
+            shutdown_timeout_secs: 10,
+        }
+    }
+}
+
 /// Pod manager that coordinates pod lifecycle with dependency resolution
 pub struct PodManager {
     registry: PodRegistry,
+    timeout_config: PodTimeoutConfig,
 }
 
 impl PodManager {
     pub fn new() -> Self {
         Self {
             registry: PodRegistry::new(),
+            timeout_config: PodTimeoutConfig::default(),
         }
+    }
+
+    /// Create a new pod manager with custom timeout configuration
+    pub fn with_timeout_config(timeout_config: PodTimeoutConfig) -> Self {
+        Self {
+            registry: PodRegistry::with_timeout_config(timeout_config.clone()),
+            timeout_config,
+        }
+    }
+
+    /// Get the timeout configuration
+    pub fn timeout_config(&self) -> &PodTimeoutConfig {
+        &self.timeout_config
     }
 
     /// Register a pod
@@ -851,8 +926,11 @@ mod tests {
         let pod = Box::new(TestPod::new("test", "1.0.0"));
         registry.register(pod).await.unwrap();
 
-        assert!(registry.get("test").is_some());
-        assert_eq!(registry.get_state("test"), Some(PodState::Loaded));
+        assert!(registry.get(&"test".to_string()).is_some());
+        assert_eq!(
+            registry.get_state(&"test".to_string()),
+            Some(PodState::Loaded)
+        );
     }
 
     #[tokio::test]
@@ -871,9 +949,18 @@ mod tests {
         registry.initialize_all().await.unwrap();
 
         // All pods should be running
-        assert_eq!(registry.get_state("a"), Some(PodState::Running));
-        assert_eq!(registry.get_state("b"), Some(PodState::Running));
-        assert_eq!(registry.get_state("c"), Some(PodState::Running));
+        assert_eq!(
+            registry.get_state(&"a".to_string()),
+            Some(PodState::Running)
+        );
+        assert_eq!(
+            registry.get_state(&"b".to_string()),
+            Some(PodState::Running)
+        );
+        assert_eq!(
+            registry.get_state(&"c".to_string()),
+            Some(PodState::Running)
+        );
 
         // Load order should be a, b, c
         assert_eq!(registry.load_order, vec!["a", "b", "c"]);

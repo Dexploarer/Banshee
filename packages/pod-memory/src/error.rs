@@ -15,6 +15,9 @@ pub enum MemoryError {
     #[error("UUID parse error: {0}")]
     UuidParse(#[from] uuid::Error),
 
+    #[error("Chrono parse error: {0}")]
+    ChronoParse(#[from] chrono::ParseError),
+
     #[error("Connection error: {0}")]
     Connection(String),
 

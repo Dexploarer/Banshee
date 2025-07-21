@@ -23,6 +23,7 @@ which = "4.4"
 
 # Math and calculations
 rust_decimal = "1.36"
+rust_decimal_macros = "1.36"
 
 # gRPC for Jito MEV bundles
 tonic = { version = "0.12", features = ["tls"] }

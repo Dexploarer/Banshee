@@ -87,7 +87,7 @@ mod tests {
     #[test]
     fn test_plugin_config() {
         let plugin = EmotionPlugin::new();
-        assert_eq!(plugin.config().name, "emotion");
-        assert_eq!(plugin.config().version, "0.1.0");
+        assert_eq!(plugin.config.id, "emotion");
+        assert_eq!(plugin.version(), "0.1.0");
     }
 }

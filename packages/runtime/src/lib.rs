@@ -12,10 +12,18 @@
 pub mod character_sheet;
 pub mod database;
 pub mod embedded_db;
+pub mod error;
 pub mod redis;
+pub mod retry;
+pub mod ai_sdk_client;
+pub mod key_manager;
+pub mod http_pool;
 
-/// Result type used throughout the runtime framework
-pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+// Re-export error types
+pub use error::{RuntimeError, Result};
+
+// Re-export retry functionality
+pub use retry::{retry, retry_with_config, RetryConfig, RetryableError};
 
 // Re-export main types for convenience
 pub use character_sheet::{CharacterSheet, CharacterSheetManager};
@@ -24,3 +32,5 @@ pub use embedded_db::{
     DatabaseType, EmbeddedDatabase, EmbeddedDatabaseConfig, EmbeddedDatabaseManager, QueryResult,
 };
 pub use redis::{RedisConfig, RedisManager, RedisStats};
+pub use ai_sdk_client::AiSdkClient;
+pub use key_manager::{KeyManager, SecureKey};

@@ -3,10 +3,9 @@ use crate::models::{CacheKey, EmotionalEventRecord, EmotionalStateRecord, ModelC
 use banshee_core::emotion::{Emotion, EmotionalEvent, EmotionalIntensity, EmotionalState};
 use chrono::Utc;
 use redis::aio::MultiplexedConnection;
-use serde_json::Value;
 use sqlx::PgPool;
 use std::collections::HashMap;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 /// Store for emotional state persistence and event history
@@ -155,7 +154,7 @@ impl EmotionStore {
             .arg(&state_json)
             .arg("EX")
             .arg(3600) // 1 hour TTL
-            .query_async(&mut self.redis.clone())
+            .query_async::<()>(&mut self.redis.clone())
             .await
             .map_err(MemoryError::Redis)?;
 
@@ -224,7 +223,7 @@ impl EmotionStore {
                 .arg(&state_json)
                 .arg("EX")
                 .arg(3600)
-                .query_async(&mut self.redis.clone())
+                .query_async::<()>(&mut self.redis.clone())
                 .await
                 .map_err(MemoryError::Redis)?;
 
@@ -291,7 +290,7 @@ impl EmotionStore {
             .arg(&event_json)
             .arg("emotions")
             .arg(serde_json::to_string(resulting_emotions)?)
-            .query_async(&mut self.redis.clone())
+            .query_async::<()>(&mut self.redis.clone())
             .await
             .map_err(MemoryError::Redis)?;
 
@@ -343,24 +342,20 @@ impl EmotionStore {
             agent_id, hours
         );
 
-        let records = sqlx::query!(
+        let records = sqlx::query_as::<_, (chrono::DateTime<Utc>, f32, f32)>(&format!(
             r#"
             SELECT created_at, valence_delta, arousal_delta
             FROM emotional_events
-            WHERE agent_id = $1 
-              AND created_at > NOW() - INTERVAL '%d hours'
+            WHERE agent_id = '{}' 
+              AND created_at > NOW() - INTERVAL '{} hours'
             ORDER BY created_at ASC
             "#,
-            agent_id,
-            hours
-        )
+            agent_id, hours
+        ))
         .fetch_all(&self.postgres)
         .await?;
 
-        let trends = records
-            .into_iter()
-            .map(|r| (r.created_at, r.valence_delta, r.arousal_delta))
-            .collect();
+        let trends = records;
 
         debug!(
             "Loaded {} emotional trend points for agent {}",
@@ -377,13 +372,10 @@ impl EmotionStore {
             days_to_keep
         );
 
-        let result = sqlx::query!(
-            r#"
-            DELETE FROM emotional_events
-            WHERE created_at < NOW() - INTERVAL '%d days'
-            "#,
+        let result = sqlx::query(&format!(
+            "DELETE FROM emotional_events WHERE created_at < NOW() - INTERVAL '{} days'",
             days_to_keep
-        )
+        ))
         .execute(&self.postgres)
         .await?;
 

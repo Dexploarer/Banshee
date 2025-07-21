@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use banshee_core::{
-    plugin::{Pod, PodConfig, PodResult, Version},
+    plugin::{Pod, PodCapability, PodConfig, PodDependency, PodResult, Version, VersionConstraint},
     Action, Evaluator, Provider,
 };
 use std::collections::HashMap;
@@ -110,7 +110,7 @@ impl Pod for JitoMevPod {
     }
 
     fn version(&self) -> &str {
-        &self.config.version.to_string()
+        "0.1.0"
     }
 
     fn dependencies(&self) -> Vec<banshee_core::plugin::PodDependency> {

@@ -1,10 +1,13 @@
 //! Providers for Jito MEV pod
 
 use async_trait::async_trait;
-use banshee_core::provider::{Provider, ProviderConfig, ProviderResult};
+use banshee_core::{
+    provider::{Provider, ProviderConfig, ProviderResult},
+    Context, Result,
+};
+use rust_decimal::prelude::FromPrimitive;
 use rust_decimal::Decimal;
-use serde_json::{json, Value};
-use solana_sdk::pubkey::Pubkey;
+use serde_json::json;
 use std::collections::HashMap;
 
 use crate::{config::JitoMevConfig, tip_router::TipRouter, types::*};
@@ -12,139 +15,130 @@ use crate::{config::JitoMevConfig, tip_router::TipRouter, types::*};
 /// Provider for MEV analytics
 pub struct MevAnalyticsProvider {
     config: JitoMevConfig,
+    provider_config: ProviderConfig,
 }
 
 impl MevAnalyticsProvider {
     pub fn new(config: JitoMevConfig) -> Self {
-        Self { config }
+        let provider_config = ProviderConfig {
+            name: "jito_mev_analytics".to_string(),
+            description: "Get MEV extraction analytics and performance metrics".to_string(),
+            priority: 50,
+            enabled: true,
+            settings: HashMap::new(),
+        };
+
+        Self {
+            config,
+            provider_config,
+        }
     }
 }
 
 #[async_trait]
 impl Provider for MevAnalyticsProvider {
     fn name(&self) -> &str {
-        "jito_mev_analytics"
+        &self.provider_config.name
     }
 
     fn description(&self) -> &str {
-        "Get MEV extraction analytics and performance metrics"
+        &self.provider_config.description
     }
 
-    fn config(&self) -> ProviderConfig {
-        ProviderConfig {
-            name: self.name().to_string(),
-            description: self.description().to_string(),
-            enabled: true,
-            cache_ttl_seconds: Some(60), // Cache for 1 minute
+    fn config(&self) -> &ProviderConfig {
+        &self.provider_config
+    }
+
+    async fn provide(&self, _context: &Context) -> Result<Vec<ProviderResult>> {
+        // Get 24h analytics
+        let analytics = MevAnalytics {
+            total_opportunities_24h: 342,
+            successful_bundles_24h: 287,
+            total_profit_24h_sol: Decimal::from(125),
+            total_tips_paid_24h_sol: Decimal::from(25),
+            average_profit_per_bundle_sol: Decimal::new(435, 3), // 0.435 SOL
+            success_rate: 83.9,
+            top_mev_types: vec![
+                (MevType::Arbitrage, 156),
+                (MevType::Liquidation, 89),
+                (MevType::Backrun, 42),
+            ],
+        };
+
+        Ok(vec![ProviderResult {
+            provider: self.name().to_string(),
+            data: serde_json::to_value(analytics)?,
+            relevance: 0.8,
+            confidence: 0.9,
+            metadata: HashMap::new(),
+            timestamp: chrono::Utc::now(),
+        }])
+    }
+
+    async fn is_relevant(&self, context: &Context) -> Result<bool> {
+        // MEV analytics are relevant when the agent is considering trading actions
+        if let Some(msg) = context.latest_message() {
+            let content = msg.text_content().to_lowercase();
+            Ok(content.contains("mev")
+                || content.contains("profit")
+                || content.contains("analytics"))
+        } else {
+            Ok(true)
         }
     }
 
-    async fn get(&self, key: &str) -> ProviderResult {
-        match key {
-            "24h" => {
-                // Mock 24h analytics
-                let analytics = MevAnalytics {
-                    total_opportunities_24h: 342,
-                    successful_bundles_24h: 287,
-                    total_profit_24h_sol: Decimal::from(125),
-                    total_tips_paid_24h_sol: Decimal::from(25),
-                    average_profit_per_bundle_sol: Decimal::new(435, 3), // 0.435 SOL
-                    success_rate: 83.9,
-                    top_mev_types: vec![
-                        (MevType::Arbitrage, 156),
-                        (MevType::Liquidation, 89),
-                        (MevType::Backrun, 42),
-                    ],
-                };
-                Ok(serde_json::to_value(analytics)?)
-            }
-            "7d" => {
-                // Mock 7d analytics
-                let analytics = MevAnalytics {
-                    total_opportunities_24h: 2394,               // Actually 7d
-                    successful_bundles_24h: 2009,                // Actually 7d
-                    total_profit_24h_sol: Decimal::from(875),    // Actually 7d
-                    total_tips_paid_24h_sol: Decimal::from(175), // Actually 7d
-                    average_profit_per_bundle_sol: Decimal::new(435, 3),
-                    success_rate: 84.1,
-                    top_mev_types: vec![
-                        (MevType::Arbitrage, 1092),
-                        (MevType::Liquidation, 623),
-                        (MevType::Backrun, 294),
-                    ],
-                };
-                Ok(serde_json::to_value(analytics)?)
-            }
-            _ => Err("Invalid time period. Use '24h' or '7d'".into()),
-        }
+    async fn initialize(&mut self) -> Result<()> {
+        Ok(())
     }
 
-    async fn query(&self, params: HashMap<String, Value>) -> ProviderResult {
-        let period = params
-            .get("period")
-            .and_then(|v| v.as_str())
-            .unwrap_or("24h");
-
-        self.get(period).await
+    async fn shutdown(&mut self) -> Result<()> {
+        Ok(())
     }
 }
 
 /// Provider for validator performance metrics
 pub struct ValidatorMetricsProvider {
     config: JitoMevConfig,
+    provider_config: ProviderConfig,
 }
 
 impl ValidatorMetricsProvider {
     pub fn new(config: JitoMevConfig) -> Self {
-        Self { config }
+        let provider_config = ProviderConfig {
+            name: "jito_validator_metrics".to_string(),
+            description: "Get validator performance metrics for MEV optimization".to_string(),
+            priority: 45,
+            enabled: true,
+            settings: HashMap::new(),
+        };
+
+        Self {
+            config,
+            provider_config,
+        }
     }
 }
 
 #[async_trait]
 impl Provider for ValidatorMetricsProvider {
     fn name(&self) -> &str {
-        "jito_validator_metrics"
+        &self.provider_config.name
     }
 
     fn description(&self) -> &str {
-        "Get validator performance metrics for MEV optimization"
+        &self.provider_config.description
     }
 
-    fn config(&self) -> ProviderConfig {
-        ProviderConfig {
-            name: self.name().to_string(),
-            description: self.description().to_string(),
-            enabled: true,
-            cache_ttl_seconds: Some(300), // Cache for 5 minutes
-        }
+    fn config(&self) -> &ProviderConfig {
+        &self.provider_config
     }
 
-    async fn get(&self, key: &str) -> ProviderResult {
-        // Mock validator metrics
-        let validator = key
-            .parse::<Pubkey>()
-            .unwrap_or_else(|_| Pubkey::new_unique());
-
-        let metrics = ValidatorMetrics {
-            validator,
-            slots_processed_24h: 8640,
-            bundles_landed_24h: 342,
-            mev_tips_earned_24h_sol: Decimal::from(12),
-            average_slot_time_ms: 405.2,
-            reliability_score: 0.94,
-        };
-
-        Ok(serde_json::to_value(metrics)?)
-    }
-
-    async fn query(&self, params: HashMap<String, Value>) -> ProviderResult {
-        let top_n = params.get("top_n").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
-
+    async fn provide(&self, _context: &Context) -> Result<Vec<ProviderResult>> {
         // Mock top validators
         let mut validators = Vec::new();
-        for i in 0..top_n {
+        for i in 0..5 {
             let metrics = ValidatorMetrics {
-                validator: Pubkey::new_unique(),
+                validator: format!("JitoValidator{}...", i + 1),
                 slots_processed_24h: 8640 - (i as u32 * 100),
                 bundles_landed_24h: 342 - (i as u32 * 20),
                 mev_tips_earned_24h_sol: Decimal::from(12 - i),
@@ -154,43 +148,76 @@ impl Provider for ValidatorMetricsProvider {
             validators.push(metrics);
         }
 
-        Ok(json!(validators))
+        Ok(vec![ProviderResult {
+            provider: self.name().to_string(),
+            data: json!(validators),
+            relevance: 0.7,
+            confidence: 0.85,
+            metadata: HashMap::new(),
+            timestamp: chrono::Utc::now(),
+        }])
+    }
+
+    async fn is_relevant(&self, context: &Context) -> Result<bool> {
+        if let Some(msg) = context.latest_message() {
+            let content = msg.text_content().to_lowercase();
+            Ok(content.contains("validator")
+                || content.contains("stake")
+                || content.contains("performance"))
+        } else {
+            Ok(false)
+        }
+    }
+
+    async fn initialize(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn shutdown(&mut self) -> Result<()> {
+        Ok(())
     }
 }
 
 /// Provider for staking rewards with MEV boost
 pub struct StakingRewardsProvider {
     config: JitoMevConfig,
+    provider_config: ProviderConfig,
 }
 
 impl StakingRewardsProvider {
     pub fn new(config: JitoMevConfig) -> Self {
-        Self { config }
+        let provider_config = ProviderConfig {
+            name: "jito_staking_rewards".to_string(),
+            description: "Calculate staking rewards with MEV boost".to_string(),
+            priority: 40,
+            enabled: true,
+            settings: HashMap::new(),
+        };
+
+        Self {
+            config,
+            provider_config,
+        }
     }
 }
 
 #[async_trait]
 impl Provider for StakingRewardsProvider {
     fn name(&self) -> &str {
-        "jito_staking_rewards"
+        &self.provider_config.name
     }
 
     fn description(&self) -> &str {
-        "Calculate staking rewards with MEV boost"
+        &self.provider_config.description
     }
 
-    fn config(&self) -> ProviderConfig {
-        ProviderConfig {
-            name: self.name().to_string(),
-            description: self.description().to_string(),
-            enabled: true,
-            cache_ttl_seconds: Some(3600), // Cache for 1 hour
-        }
+    fn config(&self) -> &ProviderConfig {
+        &self.provider_config
     }
 
-    async fn get(&self, key: &str) -> ProviderResult {
-        // Parse stake amount from key
-        let stake_amount = Decimal::from_str_exact(key).unwrap_or(Decimal::from(1000));
+    async fn provide(&self, _context: &Context) -> Result<Vec<ProviderResult>> {
+        // Default stake amount
+        let stake_amount = Decimal::from(1000);
 
         // Calculate rewards with MEV boost
         let base_apy = 5.5;
@@ -202,7 +229,7 @@ impl Provider for StakingRewardsProvider {
         );
 
         let rewards = StakingRewards {
-            validator: Pubkey::new_unique(),
+            validator: "JitoValidator1...".to_string(),
             base_apy,
             mev_boost_apy,
             total_apy: base_apy + mev_boost_apy,
@@ -212,125 +239,168 @@ impl Provider for StakingRewardsProvider {
             mev_tips_received_24h: daily_tips_estimate,
         };
 
-        Ok(serde_json::to_value(rewards)?)
+        Ok(vec![ProviderResult {
+            provider: self.name().to_string(),
+            data: serde_json::to_value(rewards)?,
+            relevance: 0.75,
+            confidence: 0.9,
+            metadata: HashMap::new(),
+            timestamp: chrono::Utc::now(),
+        }])
     }
 
-    async fn query(&self, params: HashMap<String, Value>) -> ProviderResult {
-        let stake_amount = params
-            .get("stake_amount_sol")
-            .and_then(|v| v.as_f64())
-            .and_then(|f| Decimal::from_f64(f))
-            .unwrap_or(Decimal::from(1000));
+    async fn is_relevant(&self, context: &Context) -> Result<bool> {
+        if let Some(msg) = context.latest_message() {
+            let content = msg.text_content().to_lowercase();
+            Ok(content.contains("stake") || content.contains("reward") || content.contains("apy"))
+        } else {
+            Ok(false)
+        }
+    }
 
-        self.get(&stake_amount.to_string()).await
+    async fn initialize(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    async fn shutdown(&mut self) -> Result<()> {
+        Ok(())
     }
 }
 
 /// Provider for current MEV opportunities
 pub struct MevOpportunityProvider {
     config: JitoMevConfig,
+    provider_config: ProviderConfig,
 }
 
 impl MevOpportunityProvider {
     pub fn new(config: JitoMevConfig) -> Self {
-        Self { config }
+        let provider_config = ProviderConfig {
+            name: "jito_mev_opportunities".to_string(),
+            description: "Get current MEV opportunities from mempool".to_string(),
+            priority: 60,
+            enabled: config.auto_scan,
+            settings: HashMap::new(),
+        };
+
+        Self {
+            config,
+            provider_config,
+        }
     }
 }
 
 #[async_trait]
 impl Provider for MevOpportunityProvider {
     fn name(&self) -> &str {
-        "jito_mev_opportunities"
+        &self.provider_config.name
     }
 
     fn description(&self) -> &str {
-        "Get current MEV opportunities from mempool"
+        &self.provider_config.description
     }
 
-    fn config(&self) -> ProviderConfig {
-        ProviderConfig {
-            name: self.name().to_string(),
-            description: self.description().to_string(),
-            enabled: self.config.auto_scan,
-            cache_ttl_seconds: Some(1), // Very short cache
+    fn config(&self) -> &ProviderConfig {
+        &self.provider_config
+    }
+
+    async fn provide(&self, context: &Context) -> Result<Vec<ProviderResult>> {
+        // Check emotional state for trading decisions
+        let emotional_signal = {
+            let joy = context
+                .emotional_state
+                .emotions
+                .get(&banshee_core::Emotion::Joy)
+                .unwrap_or(&0.0);
+            let fear = context
+                .emotional_state
+                .emotions
+                .get(&banshee_core::Emotion::Fear)
+                .unwrap_or(&0.0);
+            let hope = context
+                .emotional_state
+                .emotions
+                .get(&banshee_core::Emotion::Hope)
+                .unwrap_or(&0.0);
+
+            EmotionalSignal {
+                greed: (*joy * 0.6 + *hope * 0.4).min(1.0) as f64,
+                fear: *fear as f64,
+                confidence: (1.0 - *fear) as f64,
+            }
+        };
+
+        // Mock current opportunities
+        let opportunities = vec![
+            MevOpportunity {
+                id: uuid::Uuid::new_v4().to_string(),
+                mev_type: MevType::Arbitrage,
+                target_transaction: Some("mock_tx_1".to_string()),
+                estimated_profit_sol: Decimal::new(12, 1), // 1.2 SOL
+                required_capital_sol: Decimal::from(10),
+                confidence_score: 0.85,
+                expiry_slot: 123456789,
+                risk_level: RiskLevel::Medium,
+                emotional_signal,
+            },
+            MevOpportunity {
+                id: uuid::Uuid::new_v4().to_string(),
+                mev_type: MevType::Liquidation,
+                target_transaction: None,
+                estimated_profit_sol: Decimal::new(35, 1), // 3.5 SOL
+                required_capital_sol: Decimal::from(50),
+                confidence_score: 0.92,
+                expiry_slot: 123456790,
+                risk_level: RiskLevel::High,
+                emotional_signal,
+            },
+        ];
+
+        // Filter based on config
+        let filtered: Vec<_> = opportunities
+            .into_iter()
+            .filter(|opp| {
+                opp.estimated_profit_sol >= self.config.min_profit_sol
+                    && opp.confidence_score >= self.config.risk_management.min_confidence_score
+                    && self
+                        .config
+                        .risk_management
+                        .accepted_risk_levels
+                        .contains(&opp.risk_level)
+            })
+            .collect();
+
+        Ok(vec![ProviderResult {
+            provider: self.name().to_string(),
+            data: json!(filtered),
+            relevance: 0.95,
+            confidence: 0.8,
+            metadata: HashMap::new(),
+            timestamp: chrono::Utc::now(),
+        }])
+    }
+
+    async fn is_relevant(&self, context: &Context) -> Result<bool> {
+        // Always relevant if auto-scan is enabled
+        if self.config.auto_scan {
+            return Ok(true);
+        }
+
+        if let Some(msg) = context.latest_message() {
+            let content = msg.text_content().to_lowercase();
+            Ok(content.contains("opportunity")
+                || content.contains("mev")
+                || content.contains("scan"))
+        } else {
+            Ok(false)
         }
     }
 
-    async fn get(&self, key: &str) -> ProviderResult {
-        match key {
-            "current" => {
-                // Mock current opportunities
-                let opportunities = vec![
-                    MevOpportunity {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        mev_type: MevType::Arbitrage,
-                        target_transaction: Some("mock_tx_1".to_string()),
-                        estimated_profit_sol: Decimal::new(12, 1), // 1.2 SOL
-                        required_capital_sol: Decimal::from(10),
-                        confidence_score: 0.85,
-                        expiry_slot: 123456789,
-                        risk_level: RiskLevel::Medium,
-                        emotional_signal: EmotionalSignal {
-                            greed: 0.6,
-                            fear: 0.3,
-                            confidence: 0.85,
-                        },
-                    },
-                    MevOpportunity {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        mev_type: MevType::Liquidation,
-                        target_transaction: None,
-                        estimated_profit_sol: Decimal::new(35, 1), // 3.5 SOL
-                        required_capital_sol: Decimal::from(50),
-                        confidence_score: 0.92,
-                        expiry_slot: 123456790,
-                        risk_level: RiskLevel::High,
-                        emotional_signal: EmotionalSignal {
-                            greed: 0.8,
-                            fear: 0.2,
-                            confidence: 0.92,
-                        },
-                    },
-                ];
-                Ok(json!(opportunities))
-            }
-            _ => {
-                // Get specific opportunity by ID
-                Err(format!("Opportunity {} not found", key).into())
-            }
-        }
+    async fn initialize(&mut self) -> Result<()> {
+        Ok(())
     }
 
-    async fn query(&self, params: HashMap<String, Value>) -> ProviderResult {
-        let mev_type_filter = params.get("mev_type").and_then(|v| v.as_str());
-
-        let min_profit = params
-            .get("min_profit_sol")
-            .and_then(|v| v.as_f64())
-            .and_then(|f| Decimal::from_f64(f))
-            .unwrap_or(self.config.min_profit_sol);
-
-        // Get all opportunities and filter
-        let mut opportunities: Vec<MevOpportunity> =
-            serde_json::from_value(self.get("current").await?)?;
-
-        // Apply filters
-        opportunities.retain(|opp| {
-            let profit_ok = opp.estimated_profit_sol >= min_profit;
-            let type_ok = mev_type_filter.is_none()
-                || format!("{:?}", opp.mev_type).to_lowercase()
-                    == mev_type_filter.unwrap().to_lowercase();
-            let risk_ok = self
-                .config
-                .risk_management
-                .accepted_risk_levels
-                .contains(&opp.risk_level);
-            let confidence_ok =
-                opp.confidence_score >= self.config.risk_management.min_confidence_score;
-
-            profit_ok && type_ok && risk_ok && confidence_ok
-        });
-
-        Ok(json!(opportunities))
+    async fn shutdown(&mut self) -> Result<()> {
+        Ok(())
     }
 }

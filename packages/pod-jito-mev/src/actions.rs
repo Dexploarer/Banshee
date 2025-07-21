@@ -2,57 +2,100 @@
 
 use async_trait::async_trait;
 use banshee_core::{
-    action::{Action, ActionConfig, ActionExample, ActionRequest, ActionResult, EmotionalImpact},
-    emotion::{Emotion, EmotionalState},
+    action::{
+        Action, ActionConfig, ActionExample, ActionRequest, ActionResult, EmotionalImpact,
+        SideEffect,
+    },
+    emotion::Emotion,
+    Context, Result,
 };
-use rust_decimal::Decimal;
 use serde_json::{json, Value};
-use solana_sdk::pubkey::Pubkey;
 use std::collections::HashMap;
+use tracing::info;
 
-use crate::{
-    bundle_builder::BundleBuilder, config::JitoMevConfig, tip_router::TipRouter, types::*,
-};
+use crate::config::JitoMevConfig;
 
 /// Action to submit MEV bundle
 pub struct SubmitBundleAction {
     config: JitoMevConfig,
+    action_config: ActionConfig,
 }
 
 impl SubmitBundleAction {
     pub fn new(config: JitoMevConfig) -> Self {
-        Self { config }
+        let action_config = ActionConfig {
+            name: "submit_mev_bundle".to_string(),
+            description: "Submit MEV bundle to Jito block engine".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "bundle_type": {
+                        "type": "string",
+                        "enum": ["arbitrage", "liquidation", "sandwich"]
+                    },
+                    "transactions": {
+                        "type": "array",
+                        "items": { "type": "string" }
+                    },
+                    "estimated_profit_sol": { "type": "number" },
+                    "tip_sol": { "type": "number" }
+                },
+                "required": ["bundle_type", "transactions"]
+            }),
+            output_schema: Some(json!({
+                "type": "object",
+                "properties": {
+                    "bundle_id": { "type": "string" },
+                    "submitted": { "type": "boolean" },
+                    "profit_sol": { "type": "number" }
+                }
+            })),
+            has_side_effects: true,
+            emotional_impact: Some(EmotionalImpact {
+                on_success: [("Joy".to_string(), 0.6), ("Pride".to_string(), 0.4)]
+                    .iter()
+                    .cloned()
+                    .collect(),
+                on_failure: [
+                    ("Disappointment".to_string(), 0.5),
+                    ("Distress".to_string(), 0.3),
+                ]
+                .iter()
+                .cloned()
+                .collect(),
+                intensity_multiplier: 1.2,
+            }),
+            settings: HashMap::new(),
+        };
+
+        Self {
+            config,
+            action_config,
+        }
     }
 }
 
 #[async_trait]
 impl Action for SubmitBundleAction {
     fn name(&self) -> &str {
-        "submit_mev_bundle"
+        &self.action_config.name
     }
 
     fn description(&self) -> &str {
-        "Submit MEV bundle to Jito block engine"
+        &self.action_config.description
     }
 
-    fn config(&self) -> ActionConfig {
-        ActionConfig {
-            name: self.name().to_string(),
-            description: self.description().to_string(),
-            enabled: true,
-            similes: vec!["jito_submit", "mev_execute", "bundle_send"],
-            examples: vec![],
-            validates: Some(vec!["params.bundle_type", "params.transactions"]),
-        }
+    fn config(&self) -> &ActionConfig {
+        &self.action_config
     }
 
-    fn validate(&self, params: &HashMap<String, Value>) -> Result<(), String> {
-        params
+    async fn validate(&self, parameters: &HashMap<String, Value>) -> Result<()> {
+        parameters
             .get("bundle_type")
             .and_then(|v| v.as_str())
             .ok_or("Missing bundle_type parameter")?;
 
-        params
+        parameters
             .get("transactions")
             .and_then(|v| v.as_array())
             .ok_or("Missing transactions array")?;
@@ -60,86 +103,150 @@ impl Action for SubmitBundleAction {
         Ok(())
     }
 
-    fn is_available(&self, emotional_state: Option<&EmotionalState>) -> bool {
-        if let Some(state) = emotional_state {
-            // Only submit bundles when confident and not overly greedy
-            let confidence = state.get_emotion_value(&Emotion::Confidence);
-            let greed = state.get_emotion_value(&Emotion::Greed);
+    async fn is_available(&self, context: &Context) -> Result<bool> {
+        // Check if we have sufficient confidence and not overly greedy
+        if let Some(state) = Some(&context.emotional_state) {
+            let joy_level = state.emotions.get(&Emotion::Joy).unwrap_or(&0.0);
+            let distress_level = state.emotions.get(&Emotion::Distress).unwrap_or(&0.0);
 
-            confidence > 0.6 && greed < self.config.emotional_trading.greed_threshold
+            // Only submit bundles when positive emotional state
+            Ok(*joy_level > 0.4
+                && *distress_level < self.config.emotional_trading.greed_threshold as f32)
         } else {
-            true
+            Ok(true)
         }
     }
 
     fn examples(&self) -> Vec<ActionExample> {
         vec![ActionExample {
             description: "Submit arbitrage bundle".to_string(),
-            request: ActionRequest {
-                action: self.name().to_string(),
-                params: json!({
-                    "bundle_type": "arbitrage",
-                    "transactions": ["tx1_base58", "tx2_base58"],
-                    "estimated_profit_sol": 1.5,
-                    "tip_sol": 0.3
-                }),
+            parameters: {
+                let mut params = HashMap::new();
+                params.insert("bundle_type".to_string(), json!("arbitrage"));
+                params.insert(
+                    "transactions".to_string(),
+                    json!(["tx1_base58", "tx2_base58"]),
+                );
+                params.insert("estimated_profit_sol".to_string(), json!(1.5));
+                params.insert("tip_sol".to_string(), json!(0.3));
+                params
             },
-            expected_emotional_impact: EmotionalImpact {
-                primary_emotion: Emotion::Excitement,
-                intensity: 0.7,
-                valence: 0.8,
-            },
+            expected_output: json!({
+                "bundle_id": "bundle_123",
+                "submitted": true,
+                "profit_sol": 1.2
+            }),
         }]
     }
 
-    async fn execute(
-        &self,
-        request: ActionRequest,
-    ) -> Result<ActionResult, Box<dyn std::error::Error + Send + Sync>> {
+    async fn execute(&self, request: ActionRequest) -> Result<ActionResult> {
         let bundle_type = request
-            .params
+            .parameters
             .get("bundle_type")
             .and_then(|v| v.as_str())
             .ok_or("Invalid bundle_type")?;
 
+        let transactions = request
+            .parameters
+            .get("transactions")
+            .and_then(|v| v.as_array())
+            .ok_or("Invalid transactions")?;
+
         let estimated_profit = request
-            .params
+            .parameters
             .get("estimated_profit_sol")
             .and_then(|v| v.as_f64())
             .unwrap_or(0.0);
 
-        // Calculate dynamic tip if enabled
-        let tip_sol = if self.config.tip_router.dynamic_tips {
-            TipRouter::calculate_dynamic_tip(
-                Decimal::from_f64(estimated_profit).unwrap_or_default(),
-                self.config.tip_router.dynamic_tip_percentage,
-                self.config.tip_router.min_tip_sol,
-            )
-        } else {
-            request
-                .params
-                .get("tip_sol")
-                .and_then(|v| v.as_f64())
-                .and_then(|f| Decimal::from_f64(f))
-                .unwrap_or(self.config.tip_router.min_tip_sol)
+        let tip_sol = request
+            .parameters
+            .get("tip_sol")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.1);
+
+        info!(
+            "Submitting {} bundle with {} transactions, estimated profit: {} SOL",
+            bundle_type,
+            transactions.len(),
+            estimated_profit
+        );
+
+        // Check if agent is initialized
+        if !crate::ffi::is_agent_initialized() {
+            // Initialize agent if needed
+            let config = crate::ffi::SolanaAgentConfig {
+                private_key: self.config.auth_keypair.clone()
+                    .unwrap_or_else(|| "".to_string()),
+                rpc_url: match self.config.network {
+                    crate::config::NetworkType::MainnetBeta => "https://api.mainnet-beta.solana.com".to_string(),
+                    crate::config::NetworkType::Devnet => "https://api.devnet.solana.com".to_string(),
+                },
+                openai_api_key: None,
+            };
+            
+            crate::ffi::initialize_agent(&config)
+                .map_err(|e| crate::error::JitoError::FfiError(format!("Failed to initialize agent: {}", e)))?;
+        }
+
+        // Prepare MEV bundle options
+        let bundle_options = crate::ffi::MevBundleOptions {
+            bundle_type: bundle_type.to_string(),
+            transactions: transactions.iter()
+                .filter_map(|v| v.as_str())
+                .map(|s| s.to_string())
+                .collect(),
+            tip_sol,
         };
 
-        let mut metadata = HashMap::new();
-        metadata.insert("action".to_string(), json!("submit_mev_bundle"));
-        metadata.insert("bundle_type".to_string(), json!(bundle_type));
-        metadata.insert(
-            "bundle_id".to_string(),
-            json!(uuid::Uuid::new_v4().to_string()),
-        );
-        metadata.insert("tip_sol".to_string(), json!(tip_sol.to_string()));
-        metadata.insert("estimated_profit_sol".to_string(), json!(estimated_profit));
-        metadata.insert("status".to_string(), json!("submitted"));
+        // Submit bundle via FFI
+        let result = crate::ffi::submit_mev_bundle(&bundle_options)
+            .map_err(|e| crate::error::JitoError::FfiError(format!("Failed to submit MEV bundle: {}", e)))?;
+
+        let success = result.success;
+        let bundle_id = result.signature.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+        let mut side_effects = vec![];
+
+        if success {
+            side_effects.push(SideEffect::EmotionalUpdate {
+                emotions: [("Joy".to_string(), 0.6), ("Pride".to_string(), 0.4)]
+                    .iter()
+                    .cloned()
+                    .collect(),
+                reason: format!(
+                    "Successfully submitted MEV bundle with {} SOL profit",
+                    estimated_profit
+                ),
+            });
+        } else {
+            side_effects.push(SideEffect::EmotionalUpdate {
+                emotions: [
+                    ("Disappointment".to_string(), 0.5),
+                    ("Distress".to_string(), 0.3),
+                ]
+                .iter()
+                .cloned()
+                .collect(),
+                reason: "Failed to submit profitable MEV bundle".to_string(),
+            });
+        }
 
         Ok(ActionResult {
-            success: true,
-            message: format!("Submitted {} bundle with {} SOL tip", bundle_type, tip_sol),
-            metadata,
-            side_effects: vec![],
+            success,
+            data: json!({
+                "bundle_id": bundle_id,
+                "submitted": success,
+                "profit_sol": if success { estimated_profit * 0.8 } else { 0.0 },
+                "tip_sol": tip_sol,
+                "bundle_type": bundle_type,
+            }),
+            error: if !success {
+                Some("Bundle submission failed".to_string())
+            } else {
+                None
+            },
+            side_effects,
+            metadata: HashMap::new(),
         })
     }
 }
@@ -147,230 +254,366 @@ impl Action for SubmitBundleAction {
 /// Action to scan for MEV opportunities
 pub struct ScanMevAction {
     config: JitoMevConfig,
+    action_config: ActionConfig,
 }
 
 impl ScanMevAction {
     pub fn new(config: JitoMevConfig) -> Self {
-        Self { config }
+        let action_config = ActionConfig {
+            name: "scan_mev_opportunities".to_string(),
+            description: "Scan blockchain for MEV opportunities".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "scan_type": {
+                        "type": "string",
+                        "enum": ["all", "arbitrage", "liquidation", "sandwich"]
+                    },
+                    "min_profit_sol": { "type": "number" }
+                }
+            }),
+            output_schema: Some(json!({
+                "type": "object",
+                "properties": {
+                    "opportunities": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "type": { "type": "string" },
+                                "estimated_profit": { "type": "number" },
+                                "confidence": { "type": "number" }
+                            }
+                        }
+                    }
+                }
+            })),
+            has_side_effects: false,
+            emotional_impact: Some(EmotionalImpact {
+                on_success: [("Hope".to_string(), 0.4), ("Joy".to_string(), 0.3)]
+                    .iter()
+                    .cloned()
+                    .collect(),
+                on_failure: [("Disappointment".to_string(), 0.2)]
+                    .iter()
+                    .cloned()
+                    .collect(),
+                intensity_multiplier: 0.8,
+            }),
+            settings: HashMap::new(),
+        };
+
+        Self {
+            config,
+            action_config,
+        }
     }
 }
 
 #[async_trait]
 impl Action for ScanMevAction {
     fn name(&self) -> &str {
-        "scan_mev_opportunities"
+        &self.action_config.name
     }
 
     fn description(&self) -> &str {
-        "Scan mempool for MEV opportunities"
+        &self.action_config.description
     }
 
-    fn config(&self) -> ActionConfig {
-        ActionConfig {
-            name: self.name().to_string(),
-            description: self.description().to_string(),
-            enabled: self.config.auto_scan,
-            similes: vec!["mev_scan", "find_opportunities", "mempool_scan"],
-            examples: vec![],
-            validates: Some(vec![]),
-        }
+    fn config(&self) -> &ActionConfig {
+        &self.action_config
     }
 
-    fn validate(&self, _params: &HashMap<String, Value>) -> Result<(), String> {
+    async fn validate(&self, _parameters: &HashMap<String, Value>) -> Result<()> {
         Ok(())
     }
 
-    fn is_available(&self, emotional_state: Option<&EmotionalState>) -> bool {
-        if let Some(state) = emotional_state {
-            // Scan more aggressively when excited, less when fearful
-            let excitement = state.get_emotion_value(&Emotion::Excitement);
-            let fear = state.get_emotion_value(&Emotion::Fear);
-
-            excitement > fear
+    async fn is_available(&self, context: &Context) -> Result<bool> {
+        // Available when not too distressed
+        if let Some(state) = Some(&context.emotional_state) {
+            let distress = state.emotions.get(&Emotion::Distress).unwrap_or(&0.0);
+            Ok(*distress < 0.7)
         } else {
-            true
+            Ok(true)
         }
     }
 
     fn examples(&self) -> Vec<ActionExample> {
         vec![ActionExample {
-            description: "Scan for arbitrage opportunities".to_string(),
-            request: ActionRequest {
-                action: self.name().to_string(),
-                params: json!({
-                    "mev_types": ["arbitrage", "liquidation"],
-                    "min_profit_sol": 0.1
-                }),
+            description: "Scan for all MEV opportunities".to_string(),
+            parameters: {
+                let mut params = HashMap::new();
+                params.insert("scan_type".to_string(), json!("all"));
+                params.insert("min_profit_sol".to_string(), json!(0.5));
+                params
             },
-            expected_emotional_impact: EmotionalImpact {
-                primary_emotion: Emotion::Curiosity,
-                intensity: 0.6,
-                valence: 0.7,
-            },
+            expected_output: json!({
+                "opportunities": [
+                    {
+                        "type": "arbitrage",
+                        "estimated_profit": 1.2,
+                        "confidence": 0.8
+                    }
+                ]
+            }),
         }]
     }
 
-    async fn execute(
-        &self,
-        request: ActionRequest,
-    ) -> Result<ActionResult, Box<dyn std::error::Error + Send + Sync>> {
-        let mev_types = request
-            .params
-            .get("mev_types")
-            .and_then(|v| v.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>())
-            .unwrap_or_else(|| vec!["arbitrage", "liquidation", "backrun"]);
+    async fn execute(&self, request: ActionRequest) -> Result<ActionResult> {
+        let scan_type = request
+            .parameters
+            .get("scan_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("all");
 
-        // Mock MEV opportunities
-        let opportunities = vec![
-            json!({
-                "id": uuid::Uuid::new_v4().to_string(),
-                "type": "arbitrage",
-                "profit_sol": 1.2,
-                "confidence": 0.85,
-                "expiry_slot": 123456789,
-            }),
-            json!({
-                "id": uuid::Uuid::new_v4().to_string(),
-                "type": "liquidation",
-                "profit_sol": 3.5,
-                "confidence": 0.92,
-                "expiry_slot": 123456790,
-            }),
-        ];
+        let min_profit = request
+            .parameters
+            .get("min_profit_sol")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.1);
 
-        let mut metadata = HashMap::new();
-        metadata.insert("action".to_string(), json!("scan_mev_opportunities"));
-        metadata.insert("mev_types".to_string(), json!(mev_types));
-        metadata.insert(
-            "opportunities_found".to_string(),
-            json!(opportunities.len()),
+        info!(
+            "Scanning for {} MEV opportunities with min profit {} SOL",
+            scan_type, min_profit
         );
-        metadata.insert("opportunities".to_string(), json!(opportunities));
+
+        // Check if agent is initialized
+        if !crate::ffi::is_agent_initialized() {
+            // Initialize agent if needed
+            let config = crate::ffi::SolanaAgentConfig {
+                private_key: self.config.auth_keypair.clone()
+                    .unwrap_or_else(|| "".to_string()),
+                rpc_url: match self.config.network {
+                    crate::config::NetworkType::MainnetBeta => "https://api.mainnet-beta.solana.com".to_string(),
+                    crate::config::NetworkType::Devnet => "https://api.devnet.solana.com".to_string(),
+                },
+                openai_api_key: None,
+            };
+            
+            crate::ffi::initialize_agent(&config)
+                .map_err(|e| crate::error::JitoError::FfiError(format!("Failed to initialize agent: {}", e)))?;
+        }
+
+        // Prepare scan options
+        let scan_options = crate::ffi::MevScanOptions {
+            scan_type: scan_type.to_string(),
+            min_profit_sol: min_profit,
+        };
+
+        // Scan for opportunities via FFI
+        let result = crate::ffi::scan_mev_opportunities(&scan_options)
+            .map_err(|e| crate::error::JitoError::FfiError(format!("Failed to scan MEV opportunities: {}", e)))?;
+
+        let success = result.success;
+        let opportunities = result.data.as_ref()
+            .and_then(|d| d.get("opportunities"))
+            .and_then(|o| o.as_array())
+            .cloned()
+            .unwrap_or_default();
 
         Ok(ActionResult {
-            success: true,
-            message: format!("Found {} MEV opportunities", opportunities.len()),
-            metadata,
+            success,
+            data: result.data.unwrap_or_else(|| json!({
+                "opportunities": opportunities,
+                "scan_type": scan_type,
+                "total_found": opportunities.len()
+            })),
+            error: result.error,
             side_effects: vec![],
+            metadata: HashMap::new(),
         })
     }
 }
 
-/// Action to optimize staking for MEV rewards
+/// Action to optimize staking via TipRouter
 pub struct OptimizeStakingAction {
     config: JitoMevConfig,
+    action_config: ActionConfig,
 }
 
 impl OptimizeStakingAction {
     pub fn new(config: JitoMevConfig) -> Self {
-        Self { config }
+        let action_config = ActionConfig {
+            name: "optimize_staking".to_string(),
+            description: "Optimize staking allocation using TipRouter".to_string(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "amount_sol": { "type": "number" },
+                    "strategy": {
+                        "type": "string",
+                        "enum": ["maximize_yield", "minimize_risk", "balanced"]
+                    }
+                }
+            }),
+            output_schema: Some(json!({
+                "type": "object",
+                "properties": {
+                    "validators": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "address": { "type": "string" },
+                                "allocation": { "type": "number" },
+                                "expected_apy": { "type": "number" }
+                            }
+                        }
+                    },
+                    "total_expected_apy": { "type": "number" }
+                }
+            })),
+            has_side_effects: true,
+            emotional_impact: Some(EmotionalImpact {
+                on_success: [("Satisfaction".to_string(), 0.5), ("Hope".to_string(), 0.4)]
+                    .iter()
+                    .cloned()
+                    .collect(),
+                on_failure: [("Disappointment".to_string(), 0.3)]
+                    .iter()
+                    .cloned()
+                    .collect(),
+                intensity_multiplier: 0.9,
+            }),
+            settings: HashMap::new(),
+        };
+
+        Self {
+            config,
+            action_config,
+        }
     }
 }
 
 #[async_trait]
 impl Action for OptimizeStakingAction {
     fn name(&self) -> &str {
-        "optimize_staking_mev"
+        &self.action_config.name
     }
 
     fn description(&self) -> &str {
-        "Optimize staking allocation for maximum MEV rewards"
+        &self.action_config.description
     }
 
-    fn config(&self) -> ActionConfig {
-        ActionConfig {
-            name: self.name().to_string(),
-            description: self.description().to_string(),
-            enabled: true,
-            similes: vec!["stake_optimize", "mev_staking", "maximize_rewards"],
-            examples: vec![],
-            validates: Some(vec!["params.stake_amount_sol"]),
-        }
+    fn config(&self) -> &ActionConfig {
+        &self.action_config
     }
 
-    fn validate(&self, params: &HashMap<String, Value>) -> Result<(), String> {
-        let stake_amount = params
-            .get("stake_amount_sol")
+    async fn validate(&self, parameters: &HashMap<String, Value>) -> Result<()> {
+        let amount = parameters
+            .get("amount_sol")
             .and_then(|v| v.as_f64())
-            .ok_or("Missing stake_amount_sol parameter")?;
+            .ok_or("Missing or invalid amount_sol")?;
 
-        if stake_amount <= 0.0 {
-            return Err("Stake amount must be positive".to_string());
+        if amount <= 0.0 {
+            return Err("Amount must be positive".into());
         }
 
         Ok(())
     }
 
-    fn is_available(&self, _emotional_state: Option<&EmotionalState>) -> bool {
-        true
+    async fn is_available(&self, _context: &Context) -> Result<bool> {
+        Ok(true)
     }
 
     fn examples(&self) -> Vec<ActionExample> {
         vec![ActionExample {
-            description: "Optimize 1000 SOL staking".to_string(),
-            request: ActionRequest {
-                action: self.name().to_string(),
-                params: json!({
-                    "stake_amount_sol": 1000.0,
-                    "rebalance": true
-                }),
+            description: "Optimize staking for maximum yield".to_string(),
+            parameters: {
+                let mut params = HashMap::new();
+                params.insert("amount_sol".to_string(), json!(100.0));
+                params.insert("strategy".to_string(), json!("maximize_yield"));
+                params
             },
-            expected_emotional_impact: EmotionalImpact {
-                primary_emotion: Emotion::Confidence,
-                intensity: 0.6,
-                valence: 0.8,
-            },
+            expected_output: json!({
+                "validators": [
+                    {
+                        "address": "validator1...",
+                        "allocation": 60.0,
+                        "expected_apy": 8.5
+                    },
+                    {
+                        "address": "validator2...",
+                        "allocation": 40.0,
+                        "expected_apy": 7.8
+                    }
+                ],
+                "total_expected_apy": 8.22
+            }),
         }]
     }
 
-    async fn execute(
-        &self,
-        request: ActionRequest,
-    ) -> Result<ActionResult, Box<dyn std::error::Error + Send + Sync>> {
-        let stake_amount = Decimal::from_f64(
-            request
-                .params
-                .get("stake_amount_sol")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.0),
-        )
-        .unwrap_or_default();
+    async fn execute(&self, request: ActionRequest) -> Result<ActionResult> {
+        let amount = request
+            .parameters
+            .get("amount_sol")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
 
-        // Calculate optimal distribution
-        let base_apy = 5.5; // Mock base APY
-        let mev_boost_apy = 7.0; // Typical MEV boost
-        let total_apy = base_apy + mev_boost_apy;
+        let strategy = request
+            .parameters
+            .get("strategy")
+            .and_then(|v| v.as_str())
+            .unwrap_or("balanced");
 
-        let estimated_annual_rewards =
-            stake_amount * Decimal::from_f64(total_apy / 100.0).unwrap_or_default();
+        info!(
+            "Optimizing staking for {} SOL with {} strategy",
+            amount, strategy
+        );
 
-        let mut metadata = HashMap::new();
-        metadata.insert("action".to_string(), json!("optimize_staking_mev"));
-        metadata.insert(
-            "stake_amount_sol".to_string(),
-            json!(stake_amount.to_string()),
-        );
-        metadata.insert("base_apy".to_string(), json!(base_apy));
-        metadata.insert("mev_boost_apy".to_string(), json!(mev_boost_apy));
-        metadata.insert("total_apy".to_string(), json!(total_apy));
-        metadata.insert(
-            "estimated_annual_rewards_sol".to_string(),
-            json!(estimated_annual_rewards.to_string()),
-        );
-        metadata.insert(
-            "recommended_validators".to_string(),
-            json!(["Jito1", "Jito2", "Jito3"]),
-        );
+        // Check if agent is initialized
+        if !crate::ffi::is_agent_initialized() {
+            // Initialize agent if needed
+            let config = crate::ffi::SolanaAgentConfig {
+                private_key: self.config.auth_keypair.clone()
+                    .unwrap_or_else(|| "".to_string()),
+                rpc_url: match self.config.network {
+                    crate::config::NetworkType::MainnetBeta => "https://api.mainnet-beta.solana.com".to_string(),
+                    crate::config::NetworkType::Devnet => "https://api.devnet.solana.com".to_string(),
+                },
+                openai_api_key: None,
+            };
+            
+            crate::ffi::initialize_agent(&config)
+                .map_err(|e| crate::error::JitoError::FfiError(format!("Failed to initialize agent: {}", e)))?;
+        }
+
+        // Prepare optimization options
+        let optimization_options = crate::ffi::StakingOptimizationOptions {
+            amount_sol: amount,
+            strategy: strategy.to_string(),
+        };
+
+        // Optimize staking via FFI
+        let result = crate::ffi::optimize_staking(&optimization_options)
+            .map_err(|e| crate::error::JitoError::FfiError(format!("Failed to optimize staking: {}", e)))?;
+
+        let validators = result.data.as_ref()
+            .and_then(|d| d.get("validators"))
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        let total_apy = result.data.as_ref()
+            .and_then(|d| d.get("totalExpectedApy"))
+            .and_then(|a| a.as_f64())
+            .unwrap_or(0.0);
 
         Ok(ActionResult {
-            success: true,
-            message: format!(
-                "Optimized staking for {}% APY ({} SOL annual rewards)",
-                total_apy, estimated_annual_rewards
-            ),
-            metadata,
-            side_effects: vec![],
+            success: result.success,
+            data: result.data.unwrap_or_else(|| json!({
+                "validators": validators,
+                "total_expected_apy": total_apy,
+                "strategy": strategy,
+                "amount_sol": amount
+            })),
+            error: result.error,
+            side_effects: vec![SideEffect::LogEvent {
+                level: "info".to_string(),
+                message: format!("Optimized staking allocation for {} SOL", amount),
+                data: HashMap::new(),
+            }],
+            metadata: HashMap::new(),
         })
     }
 }

@@ -1,7 +1,7 @@
 //! Pump.fun program instruction builders
 
 use crate::PUMP_FUN_PROGRAM_ID;
-use borsh::{BorshSerialize, BorshDeserialize};
+use borsh::BorshSerialize;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,

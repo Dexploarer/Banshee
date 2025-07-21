@@ -1,15 +1,13 @@
 //! Providers for Pump.fun pod
 
 use async_trait::async_trait;
-use banshee_core::{Context, Result, provider::{Provider, ProviderConfig, ProviderResult}};
-use rust_decimal::Decimal;
-use rust_decimal::prelude::ToPrimitive;
-use serde_json::{json, Value};
-use solana_sdk::pubkey::Pubkey;
+use banshee_core::{
+    provider::{Provider, ProviderConfig, ProviderResult},
+    Context, Result,
+};
 use std::collections::HashMap;
-use std::str::FromStr;
 
-use crate::{bonding_curve::BondingCurveMath, config::PumpFunConfig, types::*};
+use crate::config::PumpFunConfig;
 
 /// Provider for token price information
 pub struct TokenPriceProvider {
@@ -26,7 +24,10 @@ impl TokenPriceProvider {
             enabled: true,
             settings: HashMap::new(),
         };
-        Self { pump_config, provider_config }
+        Self {
+            pump_config,
+            provider_config,
+        }
     }
 }
 
@@ -44,7 +45,7 @@ impl Provider for TokenPriceProvider {
         &self.provider_config
     }
 
-    async fn provide(&self, context: &Context) -> Result<Vec<ProviderResult>> {
+    async fn provide(&self, _context: &Context) -> Result<Vec<ProviderResult>> {
         // Mock implementation - in real implementation, would check context for token mint
         let results = vec![];
         Ok(results)
@@ -79,7 +80,10 @@ impl TokenAnalyticsProvider {
             enabled: true,
             settings: HashMap::new(),
         };
-        Self { pump_config, provider_config }
+        Self {
+            pump_config,
+            provider_config,
+        }
     }
 }
 
@@ -97,7 +101,7 @@ impl Provider for TokenAnalyticsProvider {
         &self.provider_config
     }
 
-    async fn provide(&self, context: &Context) -> Result<Vec<ProviderResult>> {
+    async fn provide(&self, _context: &Context) -> Result<Vec<ProviderResult>> {
         // Mock implementation
         let results = vec![];
         Ok(results)
@@ -131,7 +135,10 @@ impl TokenDiscoveryProvider {
             enabled: true,
             settings: HashMap::new(),
         };
-        Self { pump_config, provider_config }
+        Self {
+            pump_config,
+            provider_config,
+        }
     }
 }
 
@@ -149,7 +156,7 @@ impl Provider for TokenDiscoveryProvider {
         &self.provider_config
     }
 
-    async fn provide(&self, context: &Context) -> Result<Vec<ProviderResult>> {
+    async fn provide(&self, _context: &Context) -> Result<Vec<ProviderResult>> {
         // Mock implementation - discover new tokens based on context
         let results = vec![];
         Ok(results)

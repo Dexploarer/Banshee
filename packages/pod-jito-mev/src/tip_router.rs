@@ -1,12 +1,8 @@
 //! TipRouter integration for decentralized tip distribution
 
 use crate::{JitoError, TIP_ROUTER_PROGRAM_ID};
+use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
 use rust_decimal::Decimal;
-use solana_sdk::{
-    instruction::{AccountMeta, Instruction},
-    pubkey::Pubkey,
-    system_program,
-};
 
 /// TipRouter handles the July 2025 upgrade for decentralized tip distribution
 pub struct TipRouter;
@@ -34,45 +30,19 @@ impl TipRouter {
         Ok((staker_amount, validator_amount))
     }
 
-    /// Create tip instruction for TipRouter
-    pub fn create_tip_instruction(
-        tipper: &Pubkey,
+    /// Create tip instruction data for TipRouter (to be used with TypeScript bridge)
+    pub fn create_tip_instruction_data(
+        tipper_address: &str,
         tip_amount_lamports: u64,
-        target_validator: Option<&Pubkey>,
-    ) -> Result<Instruction, JitoError> {
-        let program_id = TIP_ROUTER_PROGRAM_ID
-            .parse::<Pubkey>()
-            .map_err(|_| JitoError::TipRouterError("Invalid program ID".to_string()))?;
-
-        // Derive TipRouter PDA accounts
-        let (tip_pool, _) = Pubkey::find_program_address(&[b"tip_pool"], &program_id);
-
-        let (staker_pool, _) = Pubkey::find_program_address(&[b"staker_pool"], &program_id);
-
-        let (validator_pool, _) = Pubkey::find_program_address(&[b"validator_pool"], &program_id);
-
-        let mut accounts = vec![
-            AccountMeta::new(*tipper, true),         // Tipper (signer)
-            AccountMeta::new(tip_pool, false),       // Tip pool PDA
-            AccountMeta::new(staker_pool, false),    // Staker pool PDA
-            AccountMeta::new(validator_pool, false), // Validator pool PDA
-            AccountMeta::new_readonly(system_program::id(), false),
-        ];
-
-        // Add target validator if specified
-        if let Some(validator) = target_validator {
-            accounts.push(AccountMeta::new_readonly(*validator, false));
-        }
-
-        // Instruction data: [0] = instruction type, [1..9] = tip amount
-        let mut data = vec![0u8]; // Tip instruction
-        data.extend_from_slice(&tip_amount_lamports.to_le_bytes());
-
-        Ok(Instruction {
-            program_id,
-            accounts,
-            data,
-        })
+        target_validator: Option<&str>,
+    ) -> Result<serde_json::Value, JitoError> {
+        // Return JSON data that can be passed to TypeScript bridge
+        Ok(serde_json::json!({
+            "program_id": TIP_ROUTER_PROGRAM_ID,
+            "tipper": tipper_address,
+            "tip_amount_lamports": tip_amount_lamports,
+            "target_validator": target_validator,
+        }))
     }
 
     /// Calculate dynamic tip based on MEV profit
@@ -110,9 +80,9 @@ impl TipRouter {
 
     /// Get optimal validators for MEV submission based on performance
     pub fn get_optimal_validators(
-        validator_metrics: &[(Pubkey, f64)], // (validator, reliability_score)
+        validator_metrics: &[(String, f64)], // (validator_address, reliability_score)
         max_validators: usize,
-    ) -> Vec<Pubkey> {
+    ) -> Vec<String> {
         let mut sorted_validators = validator_metrics.to_vec();
         sorted_validators.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 

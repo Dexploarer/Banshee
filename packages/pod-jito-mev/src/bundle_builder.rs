@@ -1,15 +1,12 @@
 //! Bundle builder for MEV extraction
 
 use crate::{tip_router::TipRouter, types::*, JitoError};
+use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
-use solana_sdk::{
-    instruction::Instruction, message::Message, pubkey::Pubkey, signature::Keypair,
-    transaction::Transaction,
-};
 
 /// Bundle builder for creating MEV bundles
 pub struct BundleBuilder {
-    transactions: Vec<Transaction>,
+    transactions: Vec<String>, // Base58 encoded transactions
     tip_amount_lamports: u64,
     target_slot: Option<u64>,
 }
@@ -23,8 +20,8 @@ impl BundleBuilder {
         }
     }
 
-    /// Add a transaction to the bundle
-    pub fn add_transaction(mut self, transaction: Transaction) -> Self {
+    /// Add a transaction to the bundle (base58 encoded)
+    pub fn add_transaction(mut self, transaction: String) -> Self {
         self.transactions.push(transaction);
         self
     }
@@ -46,11 +43,11 @@ impl BundleBuilder {
         self
     }
 
-    /// Build the final bundle with tip transaction
+    /// Build the final bundle with tip transaction data
     pub fn build(
         self,
-        payer: &Keypair,
-        tip_receiver: Option<&Pubkey>,
+        payer_address: &str,
+        tip_receiver: Option<&str>,
     ) -> Result<JitoBundle, JitoError> {
         if self.transactions.is_empty() {
             return Err(JitoError::BundleSubmissionFailed(
@@ -58,42 +55,18 @@ impl BundleBuilder {
             ));
         }
 
-        // Create tip transaction
-        let tip_instruction = TipRouter::create_tip_instruction(
-            &payer.pubkey(),
+        // Create tip instruction data
+        let _tip_instruction_data = TipRouter::create_tip_instruction_data(
+            payer_address,
             self.tip_amount_lamports,
             tip_receiver,
         )?;
 
-        let recent_blockhash = solana_sdk::hash::Hash::default(); // Would get from RPC
-        let tip_message = Message::new(&[tip_instruction], Some(&payer.pubkey()));
-        let mut tip_transaction = Transaction::new_unsigned(tip_message);
-        tip_transaction.sign(&[payer], recent_blockhash);
-
-        // Serialize all transactions
-        let mut serialized_transactions = Vec::new();
-
-        // Add user transactions first
-        for tx in self.transactions {
-            let serialized = bs58::encode(
-                bincode::serialize(&tx)
-                    .map_err(|e| JitoError::SerializationError(e.to_string()))?,
-            )
-            .into_string();
-            serialized_transactions.push(serialized);
-        }
-
-        // Add tip transaction last
-        serialized_transactions.push(
-            bs58::encode(
-                bincode::serialize(&tip_transaction)
-                    .map_err(|e| JitoError::SerializationError(e.to_string()))?,
-            )
-            .into_string(),
-        );
+        // Note: In production, the actual tip transaction would be created
+        // and signed by the TypeScript bridge using Solana Agent Kit
 
         Ok(JitoBundle {
-            transactions: serialized_transactions,
+            transactions: self.transactions,
             bundle_id: uuid::Uuid::new_v4().to_string(),
             tip_amount_lamports: self.tip_amount_lamports,
             target_slot: self.target_slot,
@@ -103,55 +76,55 @@ impl BundleBuilder {
 
     /// Create arbitrage bundle
     pub fn create_arbitrage_bundle(
-        dex_a_swap: Transaction,
-        dex_b_swap: Transaction,
+        dex_a_swap: String,
+        dex_b_swap: String,
         tip_sol: Decimal,
-        payer: &Keypair,
+        payer_address: &str,
     ) -> Result<JitoBundle, JitoError> {
         Self::new()
             .add_transaction(dex_a_swap)
             .add_transaction(dex_b_swap)
             .with_tip(tip_sol)?
-            .build(payer, None)
+            .build(payer_address, None)
     }
 
     /// Create sandwich bundle
     pub fn create_sandwich_bundle(
-        front_transaction: Transaction,
-        victim_transaction: Transaction,
-        back_transaction: Transaction,
+        front_transaction: String,
+        victim_transaction: String,
+        back_transaction: String,
         tip_sol: Decimal,
-        payer: &Keypair,
+        payer_address: &str,
     ) -> Result<JitoBundle, JitoError> {
         Self::new()
             .add_transaction(front_transaction)
             .add_transaction(victim_transaction)
             .add_transaction(back_transaction)
             .with_tip(tip_sol)?
-            .build(payer, None)
+            .build(payer_address, None)
     }
 
     /// Create backrun bundle
     pub fn create_backrun_bundle(
-        target_transaction: Transaction,
-        backrun_transaction: Transaction,
+        target_transaction: String,
+        backrun_transaction: String,
         tip_sol: Decimal,
-        payer: &Keypair,
+        payer_address: &str,
     ) -> Result<JitoBundle, JitoError> {
         Self::new()
             .add_transaction(target_transaction)
             .add_transaction(backrun_transaction)
             .with_tip(tip_sol)?
-            .build(payer, None)
+            .build(payer_address, None)
     }
 
     /// Simulate bundle for profit calculation
     pub async fn simulate_bundle(
         &self,
-        initial_balances: &[(Pubkey, u64)],
+        _initial_balances: &[(String, u64)], // (address, lamports)
     ) -> Result<Decimal, JitoError> {
         // In a real implementation, this would:
-        // 1. Connect to Jito's simulation endpoint
+        // 1. Connect to Jito's simulation endpoint via TypeScript bridge
         // 2. Submit the bundle for simulation
         // 3. Calculate profit from balance changes
 
@@ -170,5 +143,11 @@ impl BundleBuilder {
         }
 
         Ok(net_profit)
+    }
+}
+
+impl Default for BundleBuilder {
+    fn default() -> Self {
+        Self::new()
     }
 }

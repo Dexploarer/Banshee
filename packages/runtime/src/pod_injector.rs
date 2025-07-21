@@ -13,7 +13,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::ai_sdk_client::AiSdk5ClientManager;
 use crate::character_sheet::{
-    CharacterSheet, DefiPodConfig, PodConfiguration, PodInstanceConfig, PodListener,
+    CharacterSheet, PodInstanceConfig, PodListener,
 };
 use crate::mcp_manager::McpManager;
 
@@ -408,7 +408,7 @@ impl PodInjector {
 
                 if healthy {
                     pod_info.last_health_check = now;
-                    if pod_info.status == PodStatus::Error(_) {
+                    if matches!(pod_info.status, PodStatus::Error(_)) {
                         pod_info.status = PodStatus::Running;
                         info!("Pod '{}' recovered from error state", pod_id);
                     }

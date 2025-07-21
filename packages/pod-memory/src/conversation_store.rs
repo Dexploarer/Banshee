@@ -4,7 +4,7 @@ use chrono::Utc;
 use redis::aio::MultiplexedConnection;
 use serde_json::Value;
 use sqlx::PgPool;
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 use uuid::Uuid;
 
 /// Store for conversation history and message persistence
@@ -97,7 +97,7 @@ impl ConversationStore {
         redis::cmd("LPUSH")
             .arg(&cache_key)
             .arg(serde_json::to_string(&message_data)?)
-            .query_async(&mut self.redis.clone())
+            .query_async::<()>(&mut self.redis.clone())
             .await
             .map_err(MemoryError::Redis)?;
 
@@ -106,7 +106,7 @@ impl ConversationStore {
             .arg(&cache_key)
             .arg(0)
             .arg(49)
-            .query_async(&mut self.redis.clone())
+            .query_async::<()>(&mut self.redis.clone())
             .await
             .map_err(MemoryError::Redis)?;
 
@@ -114,7 +114,7 @@ impl ConversationStore {
         redis::cmd("EXPIRE")
             .arg(&cache_key)
             .arg(7200) // 2 hours
-            .query_async(&mut self.redis.clone())
+            .query_async::<()>(&mut self.redis.clone())
             .await
             .map_err(MemoryError::Redis)?;
 
@@ -231,7 +231,14 @@ impl ConversationStore {
     pub async fn get_conversation_stats(&self, agent_id: Uuid) -> MemoryResult<ConversationStats> {
         debug!("Getting conversation statistics for agent {}", agent_id);
 
-        let stats = sqlx::query!(
+        let stats = sqlx::query_as::<_, (
+            i64,  // total_messages
+            i64,  // user_messages
+            i64,  // assistant_messages
+            Option<i64>,  // total_tokens
+            Option<chrono::DateTime<Utc>>,  // first_message
+            Option<chrono::DateTime<Utc>>,  // last_message
+        )>(
             r#"
             SELECT 
                 COUNT(*) as total_messages,
@@ -242,19 +249,19 @@ impl ConversationStore {
                 MAX(created_at) as last_message
             FROM conversation_messages
             WHERE agent_id = $1
-            "#,
-            agent_id
+            "#
         )
+        .bind(agent_id)
         .fetch_one(&self.postgres)
         .await?;
 
         Ok(ConversationStats {
-            total_messages: stats.total_messages.unwrap_or(0),
-            user_messages: stats.user_messages.unwrap_or(0),
-            assistant_messages: stats.assistant_messages.unwrap_or(0),
-            total_tokens: stats.total_tokens.unwrap_or(0) as u64,
-            first_message: stats.first_message,
-            last_message: stats.last_message,
+            total_messages: stats.0,
+            user_messages: stats.1,
+            assistant_messages: stats.2,
+            total_tokens: stats.3.unwrap_or(0) as u64,
+            first_message: stats.4,
+            last_message: stats.5,
         })
     }
 
@@ -288,13 +295,10 @@ impl ConversationStore {
             days_to_keep
         );
 
-        let result = sqlx::query!(
-            r#"
-            DELETE FROM conversation_messages
-            WHERE created_at < NOW() - INTERVAL '%d days'
-            "#,
+        let result = sqlx::query(&format!(
+            "DELETE FROM conversation_messages WHERE created_at < NOW() - INTERVAL '{} days'",
             days_to_keep
-        )
+        ))
         .execute(&self.postgres)
         .await?;
 

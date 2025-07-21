@@ -2,14 +2,16 @@
 
 use async_trait::async_trait;
 use banshee_core::{
+    action::{
+        Action, ActionConfig, ActionExample, ActionRequest, ActionResult, EmotionalImpact,
+        SideEffect,
+    },
     Context, Result,
-    action::{Action, ActionConfig, ActionExample, ActionRequest, ActionResult, EmotionalImpact, SideEffect},
 };
-use rust_decimal::Decimal;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
-use crate::{config::PumpFunConfig, types::*};
+use crate::{config::PumpFunConfig, ffi};
 
 /// Action to create a new token on Pump.fun
 pub struct CreateTokenAction {
@@ -54,7 +56,10 @@ impl CreateTokenAction {
             }),
             settings: HashMap::new(),
         };
-        Self { pump_config, action_config }
+        Self {
+            pump_config,
+            action_config,
+        }
     }
 }
 
@@ -73,39 +78,92 @@ impl Action for CreateTokenAction {
     }
 
     async fn execute(&self, request: ActionRequest) -> Result<ActionResult> {
-        // Mock implementation
-        let token_mint = solana_sdk::pubkey::Pubkey::new_unique();
+        // Extract token metadata from request
+        let metadata = request.parameters.get("metadata")
+            .ok_or("Missing metadata in request")?;
         
-        Ok(ActionResult {
-            success: true,
-            data: json!({
-                "token_mint": token_mint.to_string(),
-                "status": "created"
-            }),
-            error: None,
-            side_effects: vec![
-                SideEffect::LogEvent {
+        let name = metadata.get("name")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing token name")?;
+        
+        let symbol = metadata.get("symbol")
+            .and_then(|v| v.as_str())
+            .ok_or("Missing token symbol")?;
+        
+        let _description = metadata.get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        
+        let image_url = metadata.get("image_url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        // Check if agent is initialized
+        if !ffi::is_agent_initialized() {
+            // Initialize agent if needed
+            let config = ffi::SolanaAgentConfig {
+                private_key: self.pump_config.wallet_private_key.clone()
+                    .unwrap_or_else(|| "".to_string()),
+                rpc_url: self.pump_config.rpc_endpoint.clone(),
+                openai_api_key: None,
+            };
+            
+            ffi::initialize_agent(&config)
+                .map_err(|e| crate::error::PumpFunError::FfiError(format!("Failed to initialize agent: {}", e)))?;
+        }
+
+        // Create token deployment options
+        let options = ffi::TokenDeployOptions {
+            name: name.to_string(),
+            symbol: symbol.to_string(),
+            uri: image_url.to_string(),
+            decimals: 9, // Standard SOL decimals
+            initial_supply: 1_000_000_000, // 1 billion tokens
+        };
+
+        // Deploy token via FFI
+        let result = ffi::deploy_token(&options)
+            .map_err(|e| crate::error::PumpFunError::FfiError(format!("Failed to deploy token: {}", e)))?;
+
+        if result.success {
+            Ok(ActionResult {
+                success: true,
+                data: json!({
+                    "token_mint": result.mint.unwrap_or_else(|| "pending".to_string()),
+                    "signature": result.signature,
+                    "status": "created",
+                    "details": result.data
+                }),
+                error: None,
+                side_effects: vec![SideEffect::LogEvent {
                     level: "info".to_string(),
-                    message: "Created new Pump.fun token".to_string(),
+                    message: format!("Created new Pump.fun token: {} ({})", name, symbol),
                     data: HashMap::new(),
-                }
-            ],
-            metadata: HashMap::new(),
-        })
+                }],
+                metadata: HashMap::new(),
+            })
+        } else {
+            Err(crate::error::PumpFunError::TransactionFailed(
+                result.error.unwrap_or_else(|| "Unknown error".to_string())
+            ).into())
+        }
     }
 
     async fn validate(&self, parameters: &HashMap<String, Value>) -> Result<()> {
-        let metadata = parameters.get("metadata")
+        let metadata = parameters
+            .get("metadata")
             .ok_or("Missing metadata parameter")?;
-        
-        metadata.get("name")
+
+        metadata
+            .get("name")
             .and_then(|v| v.as_str())
             .ok_or("Missing or invalid token name")?;
-        
-        metadata.get("symbol")
+
+        metadata
+            .get("symbol")
             .and_then(|v| v.as_str())
             .ok_or("Missing or invalid token symbol")?;
-        
+
         Ok(())
     }
 
@@ -117,12 +175,15 @@ impl Action for CreateTokenAction {
         vec![ActionExample {
             description: "Create a meme token".to_string(),
             parameters: HashMap::from([
-                ("metadata".to_string(), json!({
-                    "name": "Banshee Coin",
-                    "symbol": "BNSH",
-                    "description": "The emotional AI trading token",
-                    "image_url": "https://example.com/banshee.png"
-                })),
+                (
+                    "metadata".to_string(),
+                    json!({
+                        "name": "Banshee Coin",
+                        "symbol": "BNSH",
+                        "description": "The emotional AI trading token",
+                        "image_url": "https://example.com/banshee.png"
+                    }),
+                ),
                 ("initial_buy_amount".to_string(), json!(1.0)),
             ]),
             expected_output: json!({
@@ -168,7 +229,10 @@ impl BuyTokenAction {
             }),
             settings: HashMap::new(),
         };
-        Self { pump_config, action_config }
+        Self {
+            pump_config,
+            action_config,
+        }
     }
 }
 
@@ -186,7 +250,7 @@ impl Action for BuyTokenAction {
         &self.action_config
     }
 
-    async fn execute(&self, request: ActionRequest) -> Result<ActionResult> {
+    async fn execute(&self, _request: ActionRequest) -> Result<ActionResult> {
         // Mock implementation
         Ok(ActionResult {
             success: true,
@@ -202,14 +266,16 @@ impl Action for BuyTokenAction {
     }
 
     async fn validate(&self, parameters: &HashMap<String, Value>) -> Result<()> {
-        parameters.get("token_mint")
+        parameters
+            .get("token_mint")
             .and_then(|v| v.as_str())
             .ok_or("Missing or invalid token_mint")?;
-        
-        parameters.get("sol_amount")
+
+        parameters
+            .get("sol_amount")
             .and_then(|v| v.as_f64())
             .ok_or("Missing or invalid sol_amount")?;
-        
+
         Ok(())
     }
 
@@ -257,7 +323,10 @@ impl SellTokenAction {
             }),
             settings: HashMap::new(),
         };
-        Self { pump_config, action_config }
+        Self {
+            pump_config,
+            action_config,
+        }
     }
 }
 
@@ -275,7 +344,7 @@ impl Action for SellTokenAction {
         &self.action_config
     }
 
-    async fn execute(&self, request: ActionRequest) -> Result<ActionResult> {
+    async fn execute(&self, _request: ActionRequest) -> Result<ActionResult> {
         // Mock implementation
         Ok(ActionResult {
             success: true,
@@ -291,14 +360,16 @@ impl Action for SellTokenAction {
     }
 
     async fn validate(&self, parameters: &HashMap<String, Value>) -> Result<()> {
-        parameters.get("token_mint")
+        parameters
+            .get("token_mint")
             .and_then(|v| v.as_str())
             .ok_or("Missing or invalid token_mint")?;
-        
-        parameters.get("token_amount")
+
+        parameters
+            .get("token_amount")
             .and_then(|v| v.as_f64())
             .ok_or("Missing or invalid token_amount")?;
-        
+
         Ok(())
     }
 

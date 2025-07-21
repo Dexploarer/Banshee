@@ -78,3 +78,60 @@ The project is transitioning from the legacy crate structure to the modern plugi
 - Implement in the `packages/` directory structure
 - Follow the plugin interface patterns in `packages/core`
 - Maintain compatibility with existing emotion engine and character sheet functionality
+
+## Plugin Architecture Details
+
+### Pod System (Modern Architecture)
+The project uses a "Pod" system (inspired by ElizaOS) for modular functionality:
+- **Pods** are self-contained plugins implementing the `Pod` trait in `packages/core/src/plugin.rs`
+- Each pod declares capabilities, dependencies, and version constraints
+- Pods can provide Actions, Providers, and Event Handlers
+
+### Web3/Solana Integration Pods
+Several pods integrate with Solana blockchain:
+- **pod-web3**: Core wallet and token functionality
+- **pod-pump-fun**: Pump.fun bonding curve integration
+- **pod-jito-mev**: MEV bundle building via Jito
+- **pod-metaplex-core**: NFT/compression functionality via Metaplex
+- **pod-pancakeswap-infinity**: PancakeSwap integration
+
+These pods use TypeScript bridges (`solana_agent_bridge.ts`) for Solana SDK integration.
+
+### Testing Specific Components
+```bash
+# Test a specific package/pod
+cargo test -p banshee-pod-emotion
+cargo test -p banshee-core
+
+# Run tests with output
+cargo test -- --nocapture
+
+# Run specific test
+cargo test test_emotion_decay -- --exact
+```
+
+### Working with TypeScript Bridges
+Several pods use TypeScript for Solana integration:
+```bash
+# Install dependencies for a pod
+cd packages/pod-pump-fun
+bun install
+
+# Build TypeScript files
+bun run build
+
+# Watch mode for development
+bun run dev
+```
+
+## Security Considerations
+- Never commit sensitive keys or secrets
+- All warnings are treated as errors (`-D warnings`)
+- Pre-commit hooks enforce security audit via `cargo audit`
+- Use environment variables for API keys and sensitive configuration
+
+## Debugging Tips
+1. **Emotion System**: Check `crates/emotion_engine/src/lib.rs` for emotion mechanics
+2. **Pod Loading**: Enable debug logging with `RUST_LOG=debug` to see pod initialization
+3. **Type Errors**: The project enforces strict typing - avoid using `any` types
+4. **Actor Messages**: Actix actors communicate via messages defined in each crate's message modules

@@ -15,12 +15,16 @@ pub mod agent;
 pub mod character;
 pub mod context;
 pub mod emotion;
+pub mod error;
 pub mod evaluator;
 pub mod event;
 pub mod memory;
 pub mod message;
 pub mod plugin;
 pub mod provider;
+
+// Re-export error types
+pub use error::{CoreError, Result};
 
 // Re-export core types
 pub use action::{Action, ActionRequest, ActionResult};
@@ -32,11 +36,11 @@ pub use evaluator::{EvaluationResult, Evaluator};
 pub use event::{Event, EventHandler};
 pub use memory::{Memory, MemoryProvider, MemoryQuery};
 pub use message::{Message, MessageContent, MessageRole};
-pub use plugin::{Pod, PodConfig, PodManager, PodRegistry, PodDependency, PodCapability, Version, VersionConstraint};
-pub use provider::{Provider, ProviderResult, ProviderConfig};
-
-/// Result type used throughout the framework
-pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
+pub use plugin::{
+    Pod, PodCapability, PodConfig, PodDependency, PodManager, PodRegistry, Version,
+    VersionConstraint,
+};
+pub use provider::{Provider, ProviderConfig, ProviderResult};
 
 /// The main emotional agents runtime
 pub struct EmotionalAgentsRuntime {
@@ -54,7 +58,8 @@ impl EmotionalAgentsRuntime {
 
     /// Register a pod with the runtime
     pub async fn register_pod(&mut self, pod: Box<dyn Pod>) -> Result<()> {
-        self.pod_manager.register(pod).await.map_err(|e| e.into())
+        self.pod_manager.register(pod).await
+            .map_err(|e| CoreError::Plugin(e))
     }
 
     /// Register a plugin with the runtime (legacy compatibility)
@@ -63,7 +68,7 @@ impl EmotionalAgentsRuntime {
         self.pod_manager
             .register(plugin)
             .await
-            .map_err(|e| e.into())
+            .map_err(|e| CoreError::Plugin(e))
     }
 
     /// Create and register a new agent  

@@ -9,10 +9,10 @@ use solana_sdk::pubkey::Pubkey;
 #[derive(Debug, Clone, Serialize, Deserialize, BorshSerialize, BorshDeserialize)]
 pub struct BondingCurveState {
     /// The token mint address
-    pub token_mint: Pubkey,
+    pub token_mint: String,
 
     /// Creator of the bonding curve
-    pub creator: Pubkey,
+    pub creator: String,
 
     /// Total supply of tokens
     pub total_supply: u64,
@@ -101,7 +101,7 @@ pub struct TradeResult {
 /// Price information from bonding curve
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PriceInfo {
-    pub token_mint: Pubkey,
+    pub token_mint: String,
     pub price_per_token_sol: Decimal,
     pub market_cap_sol: Decimal,
     pub sol_reserve: Decimal,

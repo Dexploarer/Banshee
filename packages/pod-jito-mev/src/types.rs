@@ -2,7 +2,6 @@
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
-use solana_sdk::{pubkey::Pubkey, signature::Signature};
 
 /// MEV opportunity types
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -80,7 +79,7 @@ pub struct BundleResult {
 }
 
 /// TipRouter configuration for July 2025
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TipRouterConfig {
     /// Tip distribution percentage to stakers (default: 97%)
     pub staker_percentage: f64,
@@ -97,7 +96,7 @@ pub struct TipRouterConfig {
 /// Staking rewards information
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StakingRewards {
-    pub validator: Pubkey,
+    pub validator: String, // Base58 string instead of Pubkey
     pub base_apy: f64,
     pub mev_boost_apy: f64,
     pub total_apy: f64,
@@ -135,13 +134,13 @@ pub struct BundleParams {
 pub struct TransactionInfo {
     pub instruction_data: Vec<u8>,
     pub accounts: Vec<AccountInfo>,
-    pub signer: Option<Pubkey>,
+    pub signer: Option<String>, // Base58 string instead of Pubkey
 }
 
 /// Account information for transactions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountInfo {
-    pub pubkey: Pubkey,
+    pub pubkey: String, // Base58 string instead of Pubkey
     pub is_signer: bool,
     pub is_writable: bool,
 }
@@ -161,7 +160,7 @@ pub struct MevAnalytics {
 /// Validator performance metrics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidatorMetrics {
-    pub validator: Pubkey,
+    pub validator: String, // Base58 string instead of Pubkey
     pub slots_processed_24h: u32,
     pub bundles_landed_24h: u32,
     pub mev_tips_earned_24h_sol: Decimal,

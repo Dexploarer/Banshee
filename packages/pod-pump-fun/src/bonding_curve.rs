@@ -1,8 +1,8 @@
 //! Bonding curve mathematics and calculations
 
 use crate::types::{BondingCurveState, PriceInfo};
-use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::Decimal;
 use rust_decimal_macros::dec;
 
 /// The Pump.fun bonding curve uses a constant product AMM (x * y = k)
@@ -145,7 +145,7 @@ impl BondingCurveMath {
     /// Create price info from bonding curve state
     pub fn create_price_info(state: &BondingCurveState) -> PriceInfo {
         PriceInfo {
-            token_mint: state.token_mint,
+            token_mint: state.token_mint.clone(),
             price_per_token_sol: Self::calculate_price(state),
             market_cap_sol: Self::calculate_market_cap(state),
             sol_reserve: Decimal::from(state.sol_reserve) / dec!(1_000_000_000),
@@ -160,12 +160,11 @@ impl BondingCurveMath {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solana_sdk::pubkey::Pubkey;
 
     fn create_test_state() -> BondingCurveState {
         BondingCurveState {
-            token_mint: Pubkey::new_unique(),
-            creator: Pubkey::new_unique(),
+            token_mint: "11111111111111111111111111111111".to_string(),
+            creator: "22222222222222222222222222222222".to_string(),
             total_supply: 1_000_000_000, // 1B tokens
             sol_reserve: 10_000_000_000, // 10 SOL
             token_reserve: 900_000_000,  // 900M tokens

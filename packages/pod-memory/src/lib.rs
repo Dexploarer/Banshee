@@ -17,7 +17,7 @@ pub use models::*;
 
 use async_trait::async_trait;
 use banshee_core::emotion::{Emotion, EmotionalEvent, EmotionalIntensity, EmotionalState};
-use banshee_core::plugin::{Plugin, PluginDependency, PluginResult};
+use banshee_core::plugin::{Pod, PodDependency, PodResult};
 use serde_json::Value;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -132,7 +132,7 @@ impl MemoryPlugin {
 }
 
 #[async_trait]
-impl Plugin for MemoryPlugin {
+impl Pod for MemoryPlugin {
     fn name(&self) -> &str {
         "memory"
     }
@@ -141,12 +141,12 @@ impl Plugin for MemoryPlugin {
         env!("CARGO_PKG_VERSION")
     }
 
-    fn dependencies(&self) -> Vec<PluginDependency> {
+    fn dependencies(&self) -> Vec<PodDependency> {
         // Memory plugin has no dependencies - it's a foundational service
         Vec::new()
     }
 
-    async fn initialize(&mut self) -> PluginResult<()> {
+    async fn initialize(&mut self) -> PodResult<()> {
         self.manager
             .initialize()
             .await
@@ -154,7 +154,7 @@ impl Plugin for MemoryPlugin {
         Ok(())
     }
 
-    async fn shutdown(&mut self) -> PluginResult<()> {
+    async fn shutdown(&mut self) -> PodResult<()> {
         self.manager
             .shutdown()
             .await
@@ -162,17 +162,17 @@ impl Plugin for MemoryPlugin {
         Ok(())
     }
 
-    async fn health_check(&self) -> PluginResult<bool> {
+    async fn health_check(&self) -> PodResult<bool> {
         // Test both PostgreSQL and Redis connections
         let postgres_ok = sqlx::query("SELECT 1")
-            .fetch_one(&self.manager.postgres)
+            .fetch_one(self.manager.postgres())
             .await
             .is_ok();
 
         let redis_ok = redis::cmd("PING")
-            .query_async(&mut self.manager.redis.clone())
+            .query_async::<String>(&mut self.manager.redis())
             .await
-            .map(|response: String| response == "PONG")
+            .map(|response| response == "PONG")
             .unwrap_or(false);
 
         Ok(postgres_ok && redis_ok)
@@ -181,16 +181,14 @@ impl Plugin for MemoryPlugin {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use banshee_core::emotion::{Emotion, EmotionalState};
-    use chrono::Utc;
     use uuid::Uuid;
 
     #[tokio::test]
     async fn test_emotional_state_persistence() {
         // This would need a test database setup
         // For now, just test the structure compiles
-        let agent_id = Uuid::new_v4();
+        let _agent_id = Uuid::new_v4();
         let mut state = EmotionalState::new();
         state.update_emotion(Emotion::Joy, 0.8);
 
@@ -204,7 +202,7 @@ mod tests {
     #[tokio::test]
     async fn test_conversation_history() {
         // This would test conversation storage and retrieval
-        let agent_id = Uuid::new_v4();
+        let _agent_id = Uuid::new_v4();
         let message = "Hello, how are you?";
 
         // Would test:
@@ -217,7 +215,7 @@ mod tests {
     #[tokio::test]
     async fn test_memory_ttl() {
         // This would test TTL functionality in Redis
-        let agent_id = Uuid::new_v4();
+        let _agent_id = Uuid::new_v4();
         let data = serde_json::json!({"test": "data"});
 
         // Would test:

@@ -7,8 +7,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 use uuid::Uuid;
+
+use crate::key_manager::{KeyManager, get_api_key};
+use crate::http_pool::{ConnectionPool, PoolConfigBuilder};
+
 
 /// AI SDK client for LLM integration
 pub struct AiSdkClient {
@@ -22,6 +26,7 @@ pub struct Config {
     pub provider: String,
     pub model: String,
     pub api_key: String,
+    pub api_key_id: Option<String>, // ID from key manager
     pub temperature: Option<f32>,
     pub max_tokens: Option<u32>,
     pub streaming: bool,
@@ -34,6 +39,7 @@ impl Default for Config {
             provider: "openai".to_string(),
             model: "gpt-4".to_string(),
             api_key: String::new(),
+            api_key_id: None,
             temperature: Some(0.7),
             max_tokens: Some(2000),
             streaming: false,
@@ -227,6 +233,7 @@ pub struct AiSdk5Config {
     pub provider: String,
     pub model: String,
     pub api_key: Option<String>,
+    pub api_key_id: Option<String>, // ID from key manager
     pub transport: TransportConfig,
     pub streaming_enabled: bool,
     pub max_tokens: Option<u32>,
@@ -261,34 +268,20 @@ pub struct AiSdk5Client {
     legacy_client: AiSdkClient,
     config: AiSdk5Config,
     client_id: Uuid,
-    transport: Arc<RwLock<Option<MockTransport>>>,
+    transport: Arc<RwLock<Option<Box<dyn transport::Transport>>>>,
     streaming_active: Arc<RwLock<bool>>,
 }
 
-/// Mock transport implementation (would be replaced with actual AI SDK 5 types)
-#[derive(Debug)]
-struct MockTransport {
-    transport_type: String,
-    connected: bool,
-    last_activity: chrono::DateTime<chrono::Utc>,
-}
 
 /// MCP client wrapper for AI SDK 5 integration
 pub struct McpClient {
     config: McpClientConfig,
     client_id: Uuid,
-    transport: Arc<RwLock<Option<MockMcpTransport>>>,
+    transport: Arc<RwLock<Option<transport::McpTransport>>>,
     tools: Arc<RwLock<Vec<McpTool>>>,
     connected: Arc<RwLock<bool>>,
 }
 
-/// Mock MCP transport (would be replaced with actual MCP client)
-#[derive(Debug)]
-struct MockMcpTransport {
-    endpoint: String,
-    protocol: String,
-    last_ping: chrono::DateTime<chrono::Utc>,
-}
 
 /// AI SDK 5 client manager
 pub struct AiSdk5ClientManager {
@@ -305,6 +298,7 @@ impl AiSdk5Client {
             provider: config.provider.clone(),
             model: config.model.clone(),
             api_key: config.api_key.clone().unwrap_or_default(),
+            api_key_id: config.api_key_id.clone(),
             temperature: config.temperature.map(|t| t as f32),
             max_tokens: config.max_tokens,
             streaming: config.streaming_enabled,
@@ -324,6 +318,40 @@ impl AiSdk5Client {
             streaming_active: Arc::new(RwLock::new(false)),
         })
     }
+    
+    /// Create new AI SDK 5 client with secure key retrieval
+    pub async fn new_with_key_manager(
+        mut config: AiSdk5Config,
+        key_manager: &KeyManager,
+    ) -> crate::Result<Self> {
+        // Create legacy config with key manager
+        let legacy_config = Config {
+            provider: config.provider.clone(),
+            model: config.model.clone(),
+            api_key: config.api_key.clone().unwrap_or_default(),
+            api_key_id: config.api_key_id.clone(),
+            temperature: config.temperature.map(|t| t as f32),
+            max_tokens: config.max_tokens,
+            streaming: config.streaming_enabled,
+            base_url: match &config.transport {
+                TransportConfig::HTTP { endpoint, .. } => Some(endpoint.clone()),
+                _ => None,
+            },
+        };
+
+        let legacy_client = AiSdkClient::new_with_key_manager(legacy_config, key_manager).await?;
+        
+        // Update config with retrieved key
+        config.api_key = Some(legacy_client.config.api_key.clone());
+
+        Ok(Self {
+            legacy_client,
+            client_id: Uuid::new_v4(),
+            config,
+            transport: Arc::new(RwLock::new(None)),
+            streaming_active: Arc::new(RwLock::new(false)),
+        })
+    }
 
     /// Initialize the client and establish transport connection
     pub async fn initialize(&self) -> crate::Result<()> {
@@ -332,49 +360,9 @@ impl AiSdk5Client {
             self.client_id
         );
 
-        // Initialize transport based on configuration
-        let transport = match &self.config.transport {
-            TransportConfig::SSE {
-                url,
-                headers,
-                timeout_seconds,
-            } => {
-                info!("Setting up SSE transport to {}", url);
-                MockTransport {
-                    transport_type: "SSE".to_string(),
-                    connected: true,
-                    last_activity: chrono::Utc::now(),
-                }
-            }
-            TransportConfig::HTTP {
-                endpoint,
-                headers,
-                timeout_seconds,
-            } => {
-                info!("Setting up HTTP transport to {}", endpoint);
-                MockTransport {
-                    transport_type: "HTTP".to_string(),
-                    connected: true,
-                    last_activity: chrono::Utc::now(),
-                }
-            }
-            TransportConfig::Stdio {
-                command,
-                args,
-                working_dir,
-            } => {
-                info!(
-                    "Setting up stdio transport for command: {} {:?}",
-                    command, args
-                );
-                MockTransport {
-                    transport_type: "Stdio".to_string(),
-                    connected: true,
-                    last_activity: chrono::Utc::now(),
-                }
-            }
-        };
-
+        // Create transport based on configuration
+        let transport = transport::create_transport(&self.config.transport).await?;
+        
         *self.transport.write().await = Some(transport);
         info!(
             "AI SDK 5 client {} initialized successfully",
@@ -393,20 +381,18 @@ impl AiSdk5Client {
         if let Some(transport) = transport_guard.as_ref() {
             debug!(
                 "Using {} transport for AI SDK 5 client {}",
-                transport.transport_type, self.client_id
+                transport.transport_type(), self.client_id
             );
         }
 
         // For now, delegate to legacy client
         // In real implementation, this would use AI SDK 5 transport
-        let mut response = self.legacy_client.generate(request).await?;
+        let response = self.legacy_client.generate(request).await?;
 
         // Add AI SDK 5 metadata
-        if let Some(choice) = response.choices.first_mut() {
-            if let Some(context) = emotional_context {
-                // In real implementation, this would be handled by AI SDK 5
-                debug!("AI SDK 5 emotional context: {}", context);
-            }
+        if let Some(context) = emotional_context {
+            // In real implementation, this would be handled by AI SDK 5
+            debug!("AI SDK 5 emotional context: {}", context);
         }
 
         Ok(response)
@@ -415,10 +401,10 @@ impl AiSdk5Client {
     /// Start streaming response with AI SDK 5
     pub async fn stream_with_transport(
         &self,
-        request: GenerateRequest,
+        _request: GenerateRequest,
     ) -> crate::Result<tokio::sync::mpsc::Receiver<String>> {
         if !self.config.streaming_enabled {
-            return Err("Streaming not enabled for this client".to_string().into());
+            return Err(crate::error::RuntimeError::InvalidState("Streaming not enabled for this client".to_string()));
         }
 
         let (tx, rx) = tokio::sync::mpsc::channel(100);
@@ -455,8 +441,9 @@ impl AiSdk5Client {
         let transport_guard = self.transport.read().await;
         if let Some(transport) = transport_guard.as_ref() {
             let now = chrono::Utc::now();
-            let time_since_activity = now - transport.last_activity;
-            Ok(transport.connected && time_since_activity.num_seconds() < 300)
+            let last_activity = transport.last_activity().await;
+            let time_since_activity = now - last_activity;
+            Ok(transport.is_connected().await && time_since_activity.num_seconds() < 300)
         } else {
             Ok(false)
         }
@@ -490,34 +477,17 @@ impl McpClient {
             self.client_id, self.config.name
         );
 
-        let transport = match &self.config.transport {
-            TransportConfig::SSE { url, .. } => {
-                info!("Creating MCP SSE transport to {}", url);
-                MockMcpTransport {
-                    endpoint: url.clone(),
-                    protocol: "SSE".to_string(),
-                    last_ping: chrono::Utc::now(),
-                }
-            }
-            TransportConfig::HTTP { endpoint, .. } => {
-                info!("Creating MCP HTTP transport to {}", endpoint);
-                MockMcpTransport {
-                    endpoint: endpoint.clone(),
-                    protocol: "HTTP".to_string(),
-                    last_ping: chrono::Utc::now(),
-                }
-            }
-            TransportConfig::Stdio { command, .. } => {
-                info!("Creating MCP stdio transport for {}", command);
-                MockMcpTransport {
-                    endpoint: command.clone(),
-                    protocol: "stdio".to_string(),
-                    last_ping: chrono::Utc::now(),
-                }
-            }
-        };
-
-        *self.transport.write().await = Some(transport);
+        // Create base transport
+        let base_transport = transport::create_transport(&self.config.transport).await?;
+        
+        // Wrap in MCP transport
+        let mcp_transport = transport::McpTransport::new(base_transport, self.config.name.clone());
+        
+        // Initialize MCP handshake
+        let init_response = mcp_transport.initialize().await?;
+        debug!("MCP handshake response: {:?}", init_response);
+        
+        *self.transport.write().await = Some(mcp_transport);
         *self.connected.write().await = true;
 
         // Load available tools from MCP server
@@ -533,20 +503,22 @@ impl McpClient {
 
     /// Load tools from MCP server and convert to AI SDK format
     async fn load_tools(&self) -> crate::Result<()> {
-        let mock_tools = vec![McpTool {
-            name: format!("{}_search", self.config.name),
-            description: format!("Search capability from {}", self.config.name),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Search query"}
-                },
-                "required": ["query"]
-            }),
-            server: self.config.name.clone(),
-        }];
-
-        *self.tools.write().await = mock_tools;
+        let transport_guard = self.transport.read().await;
+        if let Some(transport) = transport_guard.as_ref() {
+            let tools_json = transport.list_tools().await?;
+            
+            let tools: Vec<McpTool> = tools_json
+                .into_iter()
+                .map(|tool| McpTool {
+                    name: tool.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                    description: tool.get("description").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                    parameters: tool.get("inputSchema").cloned().unwrap_or(serde_json::json!({})),
+                    server: self.config.name.clone(),
+                })
+                .collect();
+            
+            *self.tools.write().await = tools;
+        }
         Ok(())
     }
 
@@ -562,7 +534,7 @@ impl McpClient {
         arguments: &serde_json::Value,
     ) -> crate::Result<serde_json::Value> {
         if !*self.connected.read().await {
-            return Err("MCP client not connected".to_string().into());
+            return Err(crate::error::RuntimeError::InvalidState("MCP client not connected".to_string()));
         }
 
         debug!(
@@ -570,15 +542,13 @@ impl McpClient {
             tool_name, self.config.name
         );
 
-        let result = serde_json::json!({
-            "tool": tool_name,
-            "server": self.config.name,
-            "result": "Mock result from MCP server",
-            "arguments": arguments,
-            "timestamp": chrono::Utc::now()
-        });
-
-        Ok(result)
+        let transport_guard = self.transport.read().await;
+        if let Some(transport) = transport_guard.as_ref() {
+            let result = transport.execute_tool(tool_name, arguments.clone()).await?;
+            Ok(result)
+        } else {
+            Err(crate::error::RuntimeError::Transport("MCP transport not available".to_string()))
+        }
     }
 
     /// Shutdown MCP client
@@ -663,7 +633,7 @@ impl AiSdk5ClientManager {
                 return client.execute_tool(tool_name, arguments).await;
             }
         }
-        Err("MCP tool not found".to_string().into())
+        Err(crate::error::RuntimeError::NotFound(format!("MCP tool '{}'", tool_name)))
     }
 
     /// Shutdown all clients
@@ -689,12 +659,44 @@ impl AiSdk5ClientManager {
 impl AiSdkClient {
     /// Create new AI SDK client
     pub async fn new(config: Config) -> crate::Result<Self> {
-        let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(60))
-            .build()
-            .map_err(|e| format!("Failed to create HTTP client: {}", e) as Box<dyn std::error::Error + Send + Sync>)?;
+        // Use connection pool for HTTP client
+        let pool_config = PoolConfigBuilder::new()
+            .timeout_secs(60)
+            .enforce_tls(true)
+            .build();
+        let client = ConnectionPool::get_client(&pool_config);
 
-        Ok(Self { client, config })
+        Ok(Self { client: (*client).clone(), config })
+    }
+    
+    /// Create new AI SDK client with secure key retrieval
+    pub async fn new_with_key_manager(
+        mut config: Config,
+        key_manager: &KeyManager,
+    ) -> crate::Result<Self> {
+        // If API key is not provided, try to retrieve it securely
+        if config.api_key.is_empty() {
+            if let Some(key_id) = &config.api_key_id {
+                // Retrieve by specific key ID
+                let secure_key = key_manager.retrieve(key_id).await
+                    .map_err(|e| format!("Failed to retrieve API key: {}", e))?;
+                config.api_key = String::from_utf8(secure_key.material().to_vec())
+                    .map_err(|e| format!("Invalid API key format: {}", e))?;
+            } else {
+                // Try to get from environment or key manager by provider name
+                let env_var = match config.provider.as_str() {
+                    "openai" => "OPENAI_API_KEY",
+                    "anthropic" => "ANTHROPIC_API_KEY",
+                    "azure" => "AZURE_API_KEY",
+                    _ => return Err(crate::error::RuntimeError::Config(format!("Unknown provider: {}", config.provider))),
+                };
+                
+                config.api_key = get_api_key(key_manager, env_var, &config.provider).await
+                    .map_err(|e| format!("Failed to get API key: {}", e))?;
+            }
+        }
+        
+        Self::new(config).await
     }
 
     /// Generate completion
@@ -703,7 +705,7 @@ impl AiSdkClient {
             "openai" => self.generate_openai(request).await,
             "anthropic" => self.generate_anthropic(request).await,
             "azure" => self.generate_azure(request).await,
-            provider => Err(format!("Unsupported provider: {}", provider) as Box<dyn std::error::Error + Send + Sync>),
+            provider => Err(crate::error::RuntimeError::Config(format!("Unsupported provider: {}", provider))),
         }
     }
 
@@ -757,7 +759,7 @@ impl AiSdkClient {
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(format!("OpenAI API error {}: {}", status, error_text).into());
+            return Err(crate::error::RuntimeError::AiSdk(format!("OpenAI API error {}: {}", status, error_text)));
         }
 
         let result: GenerateResponse = response
@@ -826,7 +828,7 @@ impl AiSdkClient {
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(format!("Anthropic API error {}: {}", status, error_text).into());
+            return Err(crate::error::RuntimeError::AiSdk(format!("Anthropic API error {}: {}", status, error_text)));
         }
 
         let anthropic_response: AnthropicResponse = response
@@ -918,7 +920,7 @@ impl AiSdkClient {
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(format!("Azure OpenAI API error {}: {}", status, error_text).into());
+            return Err(crate::error::RuntimeError::AiSdk(format!("Azure OpenAI API error {}: {}", status, error_text)));
         }
 
         let result: GenerateResponse = response
@@ -971,6 +973,7 @@ mod tests {
             provider: "openai".to_string(),
             model: "gpt-4".to_string(),
             api_key: "test-key".to_string(),
+            api_key_id: None,
             temperature: Some(0.7),
             max_tokens: Some(2000),
             streaming: false,
@@ -979,5 +982,480 @@ mod tests {
 
         let client = AiSdkClient::new(config).await;
         assert!(client.is_ok());
+    }
+}
+
+/// Transport layer module for AI SDK 5 integration
+pub mod transport {
+    use async_trait::async_trait;
+    use chrono::{DateTime, Utc};
+    use reqwest::Client;
+    use std::collections::HashMap;
+    use std::process::Stdio;
+    use std::sync::Arc;
+    use crate::http_pool::{ConnectionPool, PoolConfigBuilder};
+    use tokio::process::{Child, Command};
+    use tokio::sync::RwLock;
+    use tracing::{debug, info, warn};
+    use uuid::Uuid;
+
+    use super::TransportConfig;
+
+    /// Wrapper for reqwest errors to implement RetryableError
+    struct HttpRetryError(reqwest::Error);
+    
+    impl std::fmt::Display for HttpRetryError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            self.0.fmt(f)
+        }
+    }
+    
+    impl std::fmt::Debug for HttpRetryError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            self.0.fmt(f)
+        }
+    }
+    
+    impl crate::retry::RetryableError for HttpRetryError {
+        fn is_retryable(&self) -> bool {
+            self.0.is_retryable()
+        }
+    }
+
+    /// Transport trait for AI SDK 5 communication
+    #[async_trait]
+    pub trait Transport: Send + Sync {
+        /// Get transport type identifier
+        fn transport_type(&self) -> &str;
+
+        /// Check if transport is connected
+        async fn is_connected(&self) -> bool;
+
+        /// Connect the transport
+        async fn connect(&mut self) -> crate::Result<()>;
+
+        /// Disconnect the transport
+        async fn disconnect(&mut self) -> crate::Result<()>;
+
+        /// Send a request and receive response
+        async fn request(&self, payload: serde_json::Value) -> crate::Result<serde_json::Value>;
+
+        /// Get last activity timestamp
+        async fn last_activity(&self) -> DateTime<Utc>;
+    }
+
+    /// SSE (Server-Sent Events) transport implementation
+    pub struct SseTransport {
+        url: String,
+        headers: HashMap<String, String>,
+        timeout_seconds: u64,
+        client: Client,
+        connected: Arc<RwLock<bool>>,
+        last_activity: Arc<RwLock<DateTime<Utc>>>,
+    }
+
+    impl SseTransport {
+        pub fn new(url: String, headers: HashMap<String, String>, timeout_seconds: u64) -> Self {
+            // Use connection pool for HTTP client
+            let pool_config = PoolConfigBuilder::new()
+                .timeout_secs(timeout_seconds)
+                .enforce_tls(true)
+                .build();
+            let client = ConnectionPool::get_client(&pool_config);
+
+            Self {
+                url,
+                headers,
+                timeout_seconds,
+                client: (*client).clone(),
+                connected: Arc::new(RwLock::new(false)),
+                last_activity: Arc::new(RwLock::new(Utc::now())),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Transport for SseTransport {
+        fn transport_type(&self) -> &str {
+            "SSE"
+        }
+
+        async fn is_connected(&self) -> bool {
+            *self.connected.read().await
+        }
+
+        async fn connect(&mut self) -> crate::Result<()> {
+            info!("Connecting SSE transport to {}", self.url);
+            
+            // Test connection with a simple request
+            let mut request = self.client.get(&self.url);
+            for (key, value) in &self.headers {
+                request = request.header(key, value);
+            }
+            
+            // Use retry logic for SSE connection
+            let request_clone = request.try_clone().ok_or_else(|| {
+                crate::error::RuntimeError::Transport("Failed to clone request".to_string())
+            })?;
+            
+            let response = crate::retry::retry_with_config(
+                &crate::retry::RetryConfig::network(),
+                "SSE transport connect",
+                move || {
+                    let req = request_clone.try_clone().unwrap();
+                    Box::pin(async move {
+                        req.send()
+                            .await
+                            .map_err(|e| HttpRetryError(e))
+                    })
+                },
+            )
+            .await
+            .map_err(|e| crate::error::RuntimeError::Transport(format!("SSE connection failed: {}", e.0)))?;
+
+            if response.status().is_success() {
+                *self.connected.write().await = true;
+                *self.last_activity.write().await = Utc::now();
+                info!("SSE transport connected successfully");
+                Ok(())
+            } else {
+                Err(crate::error::RuntimeError::Transport(format!("SSE connection failed with status: {}", response.status())))
+            }
+        }
+
+        async fn disconnect(&mut self) -> crate::Result<()> {
+            *self.connected.write().await = false;
+            info!("SSE transport disconnected");
+            Ok(())
+        }
+
+        async fn request(&self, payload: serde_json::Value) -> crate::Result<serde_json::Value> {
+            if !self.is_connected().await {
+                return Err("SSE transport not connected".into());
+            }
+
+            let mut request = self.client.post(&self.url);
+            for (key, value) in &self.headers {
+                request = request.header(key, value);
+            }
+
+            let response = request
+                .json(&payload)
+                .send()
+                .await
+                .map_err(|e| format!("SSE request failed: {}", e))?;
+
+            *self.last_activity.write().await = Utc::now();
+
+            if response.status().is_success() {
+                let data = response
+                    .json()
+                    .await
+                    .map_err(|e| format!("Failed to parse SSE response: {}", e))?;
+                Ok(data)
+            } else {
+                let status = response.status();
+                let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                Err(crate::error::RuntimeError::Transport(format!("SSE request failed with status {}: {}", status, error_text)))
+            }
+        }
+
+        async fn last_activity(&self) -> DateTime<Utc> {
+            *self.last_activity.read().await
+        }
+    }
+
+    /// HTTP transport implementation
+    pub struct HttpTransport {
+        endpoint: String,
+        headers: HashMap<String, String>,
+        timeout_seconds: u64,
+        client: Client,
+        connected: Arc<RwLock<bool>>,
+        last_activity: Arc<RwLock<DateTime<Utc>>>,
+    }
+
+    impl HttpTransport {
+        pub fn new(endpoint: String, headers: HashMap<String, String>, timeout_seconds: u64) -> Self {
+            // Use connection pool for HTTP client
+            let pool_config = PoolConfigBuilder::new()
+                .timeout_secs(timeout_seconds)
+                .enforce_tls(true)
+                .build();
+            let client = ConnectionPool::get_client(&pool_config);
+
+            Self {
+                endpoint,
+                headers,
+                timeout_seconds,
+                client: (*client).clone(),
+                connected: Arc::new(RwLock::new(false)),
+                last_activity: Arc::new(RwLock::new(Utc::now())),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Transport for HttpTransport {
+        fn transport_type(&self) -> &str {
+            "HTTP"
+        }
+
+        async fn is_connected(&self) -> bool {
+            *self.connected.read().await
+        }
+
+        async fn connect(&mut self) -> crate::Result<()> {
+            info!("Connecting HTTP transport to {}", self.endpoint);
+            *self.connected.write().await = true;
+            *self.last_activity.write().await = Utc::now();
+            Ok(())
+        }
+
+        async fn disconnect(&mut self) -> crate::Result<()> {
+            *self.connected.write().await = false;
+            info!("HTTP transport disconnected");
+            Ok(())
+        }
+
+        async fn request(&self, payload: serde_json::Value) -> crate::Result<serde_json::Value> {
+            if !self.is_connected().await {
+                return Err("HTTP transport not connected".into());
+            }
+
+            let mut request = self.client.post(&self.endpoint);
+            for (key, value) in &self.headers {
+                request = request.header(key, value);
+            }
+
+            // Use retry logic for network operations
+            let request_clone = request.try_clone().ok_or_else(|| {
+                crate::error::RuntimeError::Transport("Failed to clone request".to_string())
+            })?;
+            
+            let payload_clone = payload.clone();
+            let response = crate::retry::retry_with_config(
+                &crate::retry::RetryConfig::network(),
+                "HTTP transport request",
+                move || {
+                    let req = request_clone.try_clone().unwrap();
+                    let payload = payload_clone.clone();
+                    Box::pin(async move {
+                        req.json(&payload)
+                            .send()
+                            .await
+                            .map_err(|e| HttpRetryError(e))
+                    })
+                },
+            )
+            .await
+            .map_err(|e| crate::error::RuntimeError::Transport(format!("HTTP request failed: {}", e.0)))?;
+
+            *self.last_activity.write().await = Utc::now();
+
+            if response.status().is_success() {
+                let data = response
+                    .json()
+                    .await
+                    .map_err(|e| format!("Failed to parse HTTP response: {}", e))?;
+                Ok(data)
+            } else {
+                let status = response.status();
+                let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                Err(crate::error::RuntimeError::Transport(format!("HTTP request failed with status {}: {}", status, error_text)))
+            }
+        }
+
+        async fn last_activity(&self) -> DateTime<Utc> {
+            *self.last_activity.read().await
+        }
+    }
+
+    /// Stdio transport implementation for local processes
+    pub struct StdioTransport {
+        command: String,
+        args: Vec<String>,
+        working_dir: Option<String>,
+        process: Option<Child>,
+        connected: Arc<RwLock<bool>>,
+        last_activity: Arc<RwLock<DateTime<Utc>>>,
+    }
+
+    impl StdioTransport {
+        pub fn new(command: String, args: Vec<String>, working_dir: Option<String>) -> Self {
+            Self {
+                command,
+                args,
+                working_dir,
+                process: None,
+                connected: Arc::new(RwLock::new(false)),
+                last_activity: Arc::new(RwLock::new(Utc::now())),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Transport for StdioTransport {
+        fn transport_type(&self) -> &str {
+            "Stdio"
+        }
+
+        async fn is_connected(&self) -> bool {
+            *self.connected.read().await && self.process.is_some()
+        }
+
+        async fn connect(&mut self) -> crate::Result<()> {
+            info!("Starting stdio transport process: {} {:?}", self.command, self.args);
+
+            let mut cmd = Command::new(&self.command);
+            cmd.args(&self.args)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+
+            if let Some(ref dir) = self.working_dir {
+                cmd.current_dir(dir);
+            }
+
+            let child = cmd
+                .spawn()
+                .map_err(|e| format!("Failed to spawn process: {}", e))?;
+
+            self.process = Some(child);
+            *self.connected.write().await = true;
+            *self.last_activity.write().await = Utc::now();
+
+            info!("Stdio transport process started successfully");
+            Ok(())
+        }
+
+        async fn disconnect(&mut self) -> crate::Result<()> {
+            if let Some(mut process) = self.process.take() {
+                debug!("Terminating stdio transport process");
+                process.kill().await.ok();
+            }
+            *self.connected.write().await = false;
+            info!("Stdio transport disconnected");
+            Ok(())
+        }
+
+        async fn request(&self, _payload: serde_json::Value) -> crate::Result<serde_json::Value> {
+            if !self.is_connected().await {
+                return Err("Stdio transport not connected".into());
+            }
+
+            // Note: This is a simplified implementation. Real stdio transport would need
+            // proper message framing and async I/O handling
+            warn!("Stdio transport request handling not fully implemented");
+            
+            *self.last_activity.write().await = Utc::now();
+            
+            // Return mock response for now
+            Ok(serde_json::json!({
+                "status": "ok",
+                "message": "Stdio transport placeholder response"
+            }))
+        }
+
+        async fn last_activity(&self) -> DateTime<Utc> {
+            *self.last_activity.read().await
+        }
+    }
+
+    /// MCP (Model Context Protocol) transport wrapper
+    pub struct McpTransport {
+        inner: Box<dyn Transport>,
+        server_name: String,
+        protocol_version: String,
+    }
+
+    impl McpTransport {
+        pub fn new(transport: Box<dyn Transport>, server_name: String) -> Self {
+            Self {
+                inner: transport,
+                server_name,
+                protocol_version: "1.0".to_string(),
+            }
+        }
+
+        /// Initialize MCP handshake
+        pub async fn initialize(&self) -> crate::Result<serde_json::Value> {
+            let init_request = serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": self.protocol_version,
+                    "clientInfo": {
+                        "name": "banshee-runtime",
+                        "version": env!("CARGO_PKG_VERSION")
+                    }
+                },
+                "id": Uuid::new_v4().to_string()
+            });
+
+            self.inner.request(init_request).await
+        }
+
+        /// List available tools
+        pub async fn list_tools(&self) -> crate::Result<Vec<serde_json::Value>> {
+            let request = serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "tools/list",
+                "params": {},
+                "id": Uuid::new_v4().to_string()
+            });
+
+            let response = self.inner.request(request).await?;
+            
+            if let Some(tools) = response.get("result").and_then(|r| r.get("tools")) {
+                Ok(tools.as_array().cloned().unwrap_or_default())
+            } else {
+                Ok(vec![])
+            }
+        }
+
+        /// Execute a tool
+        pub async fn execute_tool(
+            &self,
+            tool_name: &str,
+            arguments: serde_json::Value,
+        ) -> crate::Result<serde_json::Value> {
+            let request = serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": tool_name,
+                    "arguments": arguments
+                },
+                "id": Uuid::new_v4().to_string()
+            });
+
+            self.inner.request(request).await
+        }
+    }
+
+    /// Create transport from configuration
+    pub async fn create_transport(config: &TransportConfig) -> crate::Result<Box<dyn Transport>> {
+        match config {
+            TransportConfig::SSE { url, headers, timeout_seconds } => {
+                let mut transport = SseTransport::new(url.clone(), headers.clone(), *timeout_seconds);
+                transport.connect().await?;
+                Ok(Box::new(transport))
+            }
+            TransportConfig::HTTP { endpoint, headers, timeout_seconds } => {
+                let mut transport = HttpTransport::new(endpoint.clone(), headers.clone(), *timeout_seconds);
+                transport.connect().await?;
+                Ok(Box::new(transport))
+            }
+            TransportConfig::Stdio { command, args, working_dir } => {
+                let mut transport = StdioTransport::new(
+                    command.clone(),
+                    args.clone(),
+                    working_dir.clone(),
+                );
+                transport.connect().await?;
+                Ok(Box::new(transport))
+            }
+        }
     }
 }

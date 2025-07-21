@@ -2,8 +2,8 @@
 
 use async_trait::async_trait;
 use banshee_core::{
-    plugin::{Pod, PodConfig, PodResult, Version},
-    Action, Evaluator, Provider,
+    plugin::{Pod, PodCapability, PodConfig, PodDependency, PodResult, Version, VersionConstraint},
+    pod_capability, pod_dependency, Action, Evaluator, Provider,
 };
 use std::collections::HashMap;
 use tracing::{info, warn};
